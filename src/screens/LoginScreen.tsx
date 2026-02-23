@@ -10,9 +10,14 @@ import {
   Platform,
   SafeAreaView,
   Image,
+  Alert,
 } from 'react-native';
-import { colors } from '../constants/colors';
+import { Ionicons } from '@expo/vector-icons';
+import { LinearGradient } from 'expo-linear-gradient';
 import { useAuth } from '../hooks';
+import AppBackground from '../components/AppBackground';
+import { colors } from '../constants/colors';
+import authService from '../services/authService';
 
 interface LoginScreenProps {
   onLogin: () => void;
@@ -22,6 +27,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [passwordVisible, setPasswordVisible] = useState(false);
   const [username, setUsername] = useState('');
   const { signIn, signUp } = useAuth();
 
@@ -33,65 +39,150 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
         await signUp(email, password, username);
       }
       onLogin();
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Authentication failed');
+    }
+  };
+
+  const handleForgotPassword = async () => {
+    if (!email) {
+      Alert.alert('Error', 'Please enter your email to reset the password');
+      return;
+    }
+    try {
+      await authService.resetPassword(email);
+      Alert.alert('Email Sent', 'Check your inbox for the password reset link.');
+    } catch (e: any) {
+      Alert.alert('Error', e.message || 'Failed to send reset email.');
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'} style={styles.flex}>
-        <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <AppBackground />
+
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        style={styles.flex}
+      >
+        <ScrollView
+          contentContainerStyle={styles.content}
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+        >
+          {/* Logo + Branding */}
           <View style={styles.logoContainer}>
-            <Image source={require('../../assets/icon.png')} style={styles.logo} resizeMode="contain" />
-            <Text style={styles.appName}>BETRA</Text>
+            <Image
+              source={require('../../assets/new_logo.png')}
+              style={styles.logo}
+              resizeMode="contain"
+            />
+            <Text style={styles.brandName}>BETRA</Text>
             <Text style={styles.tagline}>Track. Analyze. Win.</Text>
           </View>
 
-          <View style={styles.toggleContainer}>
-            <TouchableOpacity style={[styles.toggle, isLogin && styles.toggleActive]} onPress={() => setIsLogin(true)}>
-              <Text style={[styles.toggleText, isLogin && styles.toggleTextActive]}>Login</Text>
+          {/* Tabs — underline style */}
+          <View style={styles.tabRow}>
+            <TouchableOpacity
+              style={[styles.tab, isLogin && styles.tabActive]}
+              onPress={() => setIsLogin(true)}
+            >
+              {isLogin && <View style={styles.tabDot} />}
+              <Text style={[styles.tabText, isLogin && styles.tabTextActive]}>Login</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={[styles.toggle, !isLogin && styles.toggleActive]} onPress={() => setIsLogin(false)}>
-              <Text style={[styles.toggleText, !isLogin && styles.toggleTextActive]}>Sign Up</Text>
+            <TouchableOpacity
+              style={[styles.tab, !isLogin && styles.tabActive]}
+              onPress={() => setIsLogin(false)}
+            >
+              {!isLogin && <View style={styles.tabDot} />}
+              <Text style={[styles.tabText, !isLogin && styles.tabTextActive]}>Sign Up</Text>
             </TouchableOpacity>
           </View>
 
-          {!isLogin && (
-            <TextInput
-              style={styles.input}
-              placeholder="Username"
-              placeholderTextColor={colors.textMuted}
-              value={username}
-              onChangeText={setUsername}
-              autoCapitalize="none"
-            />
-          )}
-          <TextInput
-            style={styles.input}
-            placeholder="Email"
-            placeholderTextColor={colors.textMuted}
-            value={email}
-            onChangeText={setEmail}
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Password"
-            placeholderTextColor={colors.textMuted}
-            value={password}
-            onChangeText={setPassword}
-            secureTextEntry
-          />
+          {/* Form */}
+          <View style={styles.form}>
+            {!isLogin && (
+              <View style={styles.inputGroup}>
+                <Text style={styles.inputLabel}>Username</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder="Enter username"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                  value={username}
+                  onChangeText={setUsername}
+                  autoCapitalize="none"
+                />
+              </View>
+            )}
 
-          <TouchableOpacity style={styles.button} onPress={handleAuth}>
-            <Text style={styles.buttonText}>{isLogin ? 'Login' : 'Create Account'}</Text>
-          </TouchableOpacity>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Email</Text>
+              <TextInput
+                style={styles.input}
+                placeholder="Enter your email"
+                placeholderTextColor="rgba(255,255,255,0.4)"
+                value={email}
+                onChangeText={setEmail}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+            </View>
 
-          <TouchableOpacity style={styles.guestButton} onPress={onLogin}>
-            <Text style={styles.guestText}>Continue as Guest →</Text>
-          </TouchableOpacity>
+            <View style={styles.inputGroup}>
+              <Text style={styles.inputLabel}>Password</Text>
+              <View style={styles.passwordContainer}>
+                <TextInput
+                  style={styles.passwordInput}
+                  placeholder="Enter your password"
+                  placeholderTextColor="rgba(255,255,255,0.4)"
+                  value={password}
+                  onChangeText={setPassword}
+                  secureTextEntry={!passwordVisible}
+                />
+                <TouchableOpacity
+                  style={styles.eyeButton}
+                  onPress={() => setPasswordVisible(!passwordVisible)}
+                >
+                  <Ionicons
+                    name={passwordVisible ? 'eye-off' : 'eye'}
+                    size={20}
+                    color="rgba(255,255,255,0.5)"
+                  />
+                </TouchableOpacity>
+              </View>
+            </View>
+
+            {/* Submit Button — gradient */}
+            <TouchableOpacity 
+              style={styles.buttonWrap} 
+              onPress={handleAuth} 
+              activeOpacity={0.9}
+              accessibilityRole="button"
+              accessibilityLabel={isLogin ? 'Login' : 'Create Account'}
+            >
+              <LinearGradient
+                colors={['#5BAAF0', '#4A9FD4', '#3A8BC4']}
+                style={styles.button}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+              >
+                <Text style={styles.buttonText}>
+                  {isLogin ? 'Login' : 'Create Account'}
+                </Text>
+              </LinearGradient>
+            </TouchableOpacity>
+
+            {isLogin && (
+              <TouchableOpacity 
+              style={styles.forgotButton} 
+              onPress={handleForgotPassword}
+              accessibilityRole="button"
+              accessibilityLabel="Forgot Password"
+            >
+                <Text style={styles.forgotText}>Forgot password?</Text>
+              </TouchableOpacity>
+            )}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
@@ -99,21 +190,153 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  flex: { flex: 1 },
-  content: { padding: 24, justifyContent: 'center', flexGrow: 1 },
-  logoContainer: { alignItems: 'center', marginBottom: 40 },
-  logo: { width: 120, height: 120, borderRadius: 24, marginBottom: 16 },
-  appName: { fontSize: 32, fontWeight: 'bold', color: colors.textPrimary, letterSpacing: 4 },
-  tagline: { fontSize: 14, color: colors.textMuted, marginTop: 8 },
-  toggleContainer: { flexDirection: 'row', backgroundColor: colors.surface, borderRadius: 12, padding: 4, marginBottom: 24 },
-  toggle: { flex: 1, paddingVertical: 12, alignItems: 'center', borderRadius: 8 },
-  toggleActive: { backgroundColor: colors.accent },
-  toggleText: { fontWeight: '600', color: colors.textMuted },
-  toggleTextActive: { color: colors.primary },
-  input: { backgroundColor: colors.surface, borderRadius: 12, padding: 14, marginBottom: 12, color: colors.textPrimary, borderWidth: 1, borderColor: colors.border },
-  button: { backgroundColor: colors.accent, borderRadius: 12, padding: 16, alignItems: 'center', marginTop: 8 },
-  buttonText: { fontWeight: 'bold', color: colors.primary, fontSize: 16 },
-  guestButton: { alignItems: 'center', marginTop: 24 },
-  guestText: { color: colors.accent, fontWeight: '600', fontSize: 16 },
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+  },
+  flex: {
+    flex: 1,
+  },
+
+  // Content
+  content: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    padding: 32,
+  },
+
+  // Logo + Branding
+  logoContainer: {
+    alignItems: 'center',
+    marginBottom: 28,
+  },
+  logo: {
+    width: 100,
+    height: 100,
+  },
+  brandName: {
+    fontSize: 28,
+    fontWeight: '800',
+    color: '#ffffff',
+    letterSpacing: 4,
+    marginTop: 12,
+  },
+  tagline: {
+    fontSize: 14,
+    color: 'rgba(255,255,255,0.85)',
+    marginTop: 6,
+  },
+
+  // Tabs — underline style
+  tabRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    gap: 32,
+    marginBottom: 28,
+  },
+  tab: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 4,
+    gap: 8,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
+  },
+  tabActive: {
+    borderBottomColor: colors.accent,
+  },
+  tabDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: colors.accent,
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: 'rgba(255,255,255,0.5)',
+  },
+  tabTextActive: {
+    color: '#ffffff',
+  },
+
+  // Form
+  form: {
+    gap: 20,
+  },
+
+  // Inputs
+  inputGroup: {
+    marginBottom: 4,
+  },
+  inputLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#ffffff',
+    marginBottom: 8,
+  },
+  input: {
+    backgroundColor: 'rgba(30, 50, 80, 0.6)',
+    borderRadius: 12,
+    padding: 16,
+    color: '#ffffff',
+    borderWidth: 1,
+    borderColor: 'rgba(135, 206, 235, 0.35)',
+    fontSize: 16,
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' as const }),
+  },
+  passwordContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: 'rgba(30, 50, 80, 0.6)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(135, 206, 235, 0.35)',
+  },
+  passwordInput: {
+    flex: 1,
+    padding: 16,
+    color: '#ffffff',
+    fontSize: 16,
+    ...(Platform.OS === 'web' && { outlineStyle: 'none' as const }),
+  },
+  eyeButton: {
+    padding: 16,
+    paddingLeft: 0,
+  },
+
+  // Buttons
+  buttonWrap: {
+    marginTop: 8,
+    borderRadius: 12,
+    overflow: 'hidden',
+  },
+  button: {
+    padding: 16,
+    alignItems: 'center',
+    borderRadius: 12,
+  },
+  buttonText: {
+    fontWeight: '700',
+    color: '#ffffff',
+    fontSize: 16,
+  },
+  forgotButton: {
+    alignSelf: 'center',
+  },
+  forgotText: {
+    fontSize: 14,
+    color: '#ffffff',
+    fontWeight: '500',
+  },
+  guestButton: {
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  guestText: {
+    color: colors.accent,
+    fontWeight: '500',
+    fontSize: 14,
+  },
 });

@@ -1,8 +1,9 @@
 import React from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
-import { useBets } from '../hooks';
+import { useBets, useNotifications } from '../hooks';
 
 interface BetDetailScreenProps {
   route: any;
@@ -10,30 +11,78 @@ interface BetDetailScreenProps {
 }
 
 export default function BetDetailScreen({ route, navigation }: BetDetailScreenProps) {
+  const insets = useSafeAreaInsets();
   const { betId } = route.params || {};
-  const { bets, updateStatus } = useBets();
+  const { bets, updateStatus, deleteBet } = useBets();
+  const { sendBetResultNotification } = useNotifications();
   const bet = bets.find(b => b.id === betId);
 
   if (!bet) {
     return (
       <View style={styles.container}>
+        <View style={[styles.header, { paddingTop: Math.max(insets.top + 10, 50) }]}>
+          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+            <Ionicons name="arrow-back" size={28} color={colors.textPrimary} />
+          </TouchableOpacity>
+        </View>
         <Text style={styles.errorText}>Bet not found</Text>
       </View>
     );
   }
 
-  const handleStatusChange = (status: 'won' | 'lost') => {
-    updateStatus(bet.id, status);
+  const handleStatusChange = async (status: 'won' | 'lost') => {
+    try {
+      await updateStatus(bet.id, status);
+      const profit = status === 'won' ? bet.potentialWin - bet.stake : -bet.stake;
+      await sendBetResultNotification(bet.title, status, profit, bet.id);
+    } catch (error: any) {
+      const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
+      Alert.alert('Error', isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to update bet. Please try again.');
+    }
+  };
+
+  const handleDelete = () => {
+    if (Platform.OS === 'web') {
+      const confirm = window.confirm('Are you sure you want to delete this bet?');
+      if (confirm) {
+        deleteBet(bet.id).then(() => {
+          navigation.goBack();
+        }).catch((error: any) => {
+          const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
+          window.alert(isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to delete bet. Please try again.');
+        });
+      }
+    } else {
+      Alert.alert('Delete Bet', 'Are you sure you want to delete this bet?', [
+        { text: 'Cancel', style: 'cancel' },
+        { text: 'Delete', style: 'destructive', onPress: async () => {
+          try {
+            await deleteBet(bet.id);
+            navigation.goBack();
+          } catch (error: any) {
+            const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
+            Alert.alert('Error', isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to delete bet. Please try again.');
+          }
+        }}
+      ]);
+    }
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 10, 50) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Bet Details</Text>
-        <View style={{ width: 44 }} />
+        <View style={{ flexDirection: 'row', gap: 16 }}>
+          <TouchableOpacity onPress={() => navigation.navigate('AddBet', { bet })}>
+            <Ionicons name="pencil" size={24} color={colors.textPrimary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDelete}>
+            <Ionicons name="trash" size={24} color={colors.error} />
+          </TouchableOpacity>
+        </View>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
@@ -78,7 +127,7 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 12 },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 16, paddingBottom: 12 },
   backButton: { padding: 8 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary },
   content: { padding: 16 },

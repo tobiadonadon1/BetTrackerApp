@@ -1,0 +1,13 @@
+---
+description: Always restart dev server and show browser after UI changes
+alwaysApply: true
+---
+
+# Dev Server & Browser Preview
+
+After making **any UI/frontend changes** to this Expo/React Native project:
+
+1. **Restart the dev server** – Kill any existing Expo/Metro process and run `npx expo start --web --port 8082 --clear` so changes are visible.
+2. **Show in Cursor browser** – Tell the user to open or refresh the browser in Cursor's dev side (Simple Browser / Preview panel) at `http://localhost:8082` so they can see the result immediately.
+
+Do this **automatically** after every UI change. Do not wait for the user to ask.

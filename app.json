@@ -14,9 +14,12 @@
     },
     "ios": {
       "supportsTablet": true,
-      "bundleIdentifier": "com.betra.app"
+      "bundleIdentifier": "com.betra.app",
+      "buildNumber": "1"
     },
     "android": {
+      "package": "com.betra.app",
+      "versionCode": 1,
       "adaptiveIcon": {
         "foregroundImage": "./assets/adaptive-icon.png",
         "backgroundColor": "#0B1B3D"
@@ -24,6 +27,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "73541ae9-eabf-4a88-aa19-1bb9a4c98893"
+      }
+    },
+    "owner": "tobiadonadon"
   }
 }

@@ -1,23 +1,28 @@
 import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
 import { BetCategory, BetType } from '../types';
 import { useBets } from '../hooks';
 
 interface AddBetScreenProps {
   navigation: any;
+  route: any;
 }
 
 const CATEGORIES: BetCategory[] = ['NBA', 'NFL', 'MLB', 'NHL', 'Soccer', 'Tennis', 'UFC', 'Boxing', 'Golf', 'Other'];
 
-export default function AddBetScreen({ navigation }: AddBetScreenProps) {
-  const { createBet } = useBets();
-  const [title, setTitle] = useState('');
-  const [bookmaker, setBookmaker] = useState('');
-  const [stake, setStake] = useState('');
-  const [odds, setOdds] = useState('');
-  const [category, setCategory] = useState<BetCategory>('Other');
+export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
+  const insets = useSafeAreaInsets();
+  const { createBet, updateBet } = useBets();
+  const editingBet = route.params?.bet;
+
+  const [title, setTitle] = useState(editingBet?.title || '');
+  const [bookmaker, setBookmaker] = useState(editingBet?.bookmaker || '');
+  const [stake, setStake] = useState(editingBet?.stake?.toString() || '');
+  const [odds, setOdds] = useState(editingBet?.totalOdds?.toString() || '');
+  const [category, setCategory] = useState<BetCategory>(editingBet?.category || 'Other');
 
   const handleSave = async () => {
     if (!title || !bookmaker || !stake || !odds) {
@@ -26,44 +31,74 @@ export default function AddBetScreen({ navigation }: AddBetScreenProps) {
     }
 
     try {
-      await createBet({
-        title: title.trim(),
-        bookmaker: bookmaker.trim(),
-        stake: parseFloat(stake),
-        totalOdds: parseFloat(odds),
-        potentialWin: parseFloat(stake) * parseFloat(odds),
-        status: 'pending',
-        date: new Date().toISOString().split('T')[0],
-        selections: [{
-          id: Date.now().toString(),
-          event: title.trim(),
-          selection: title.trim(),
-          odds: parseFloat(odds),
-          status: 'pending',
+      if (editingBet) {
+        await updateBet(editingBet.id, {
+          title: title.trim(),
+          bookmaker: bookmaker.trim(),
+          stake: parseFloat(stake),
+          totalOdds: parseFloat(odds),
+          potentialWin: parseFloat(stake) * parseFloat(odds),
           category,
-        }],
-        category,
-        betType: 'single',
-      });
-      Alert.alert('Success', 'Bet saved!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
-    } catch (error) {
-      Alert.alert('Error', 'Failed to save bet');
+        });
+        Alert.alert('Success', 'Bet updated!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      } else {
+        await createBet({
+          title: title.trim(),
+          bookmaker: bookmaker.trim(),
+          stake: parseFloat(stake),
+          totalOdds: parseFloat(odds),
+          potentialWin: parseFloat(stake) * parseFloat(odds),
+          status: 'pending',
+          date: new Date().toISOString().split('T')[0],
+          selections: [{
+            id: Date.now().toString(),
+            event: title.trim(),
+            selection: title.trim(),
+            odds: parseFloat(odds),
+            status: 'pending',
+            category,
+          }],
+          category,
+          betType: 'single',
+        });
+        Alert.alert('Success', 'Bet saved!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
+      }
+    } catch (error: any) {
+      const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
+      Alert.alert('Error', isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to save bet. Please try again.');
     }
   };
 
   return (
     <View style={styles.container}>
-      <View style={styles.header}>
+      <View style={[styles.header, { paddingTop: Math.max(insets.top + 10, 50) }]}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>Add Bet</Text>
-        <TouchableOpacity style={styles.saveButton} onPress={handleSave}>
+        <Text style={styles.headerTitle}>{editingBet ? 'Edit Bet' : 'Add Bet'}</Text>
+        <TouchableOpacity 
+          style={styles.saveButton} 
+          onPress={handleSave}
+          accessibilityRole="button"
+          accessibilityLabel="Save Bet"
+        >
           <Text style={styles.saveText}>Save</Text>
         </TouchableOpacity>
       </View>
 
       <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+        {!editingBet && (
+          <TouchableOpacity 
+          style={styles.scanTicketButton} 
+          onPress={() => navigation.navigate('ScanTicket')}
+          accessibilityRole="button"
+          accessibilityLabel="Scan Ticket Instantly"
+        >
+            <Ionicons name="camera" size={20} color={colors.primary} />
+            <Text style={styles.scanTicketText}>Scan Ticket Instantly</Text>
+          </TouchableOpacity>
+        )}
+
         <TextInput
           style={styles.input}
           placeholder="Bet Title *"
@@ -116,7 +151,7 @@ export default function AddBetScreen({ navigation }: AddBetScreenProps) {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingTop: 50, paddingBottom: 12 },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12 },
   backButton: { padding: 8 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary },
   saveButton: { backgroundColor: colors.accent, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
@@ -132,4 +167,6 @@ const styles = StyleSheet.create({
   categoryButtonActive: { backgroundColor: colors.accent, borderColor: colors.accent },
   categoryText: { fontSize: 12, color: colors.textMuted },
   categoryTextActive: { color: colors.primary, fontWeight: '600' },
+  scanTicketButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.accent, borderRadius: 12, padding: 14, marginBottom: 20, gap: 8 },
+  scanTicketText: { fontWeight: 'bold', color: colors.primary, fontSize: 16 },
 });
