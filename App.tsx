@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { View, StyleSheet } from 'react-native';
+import React, { useState } from 'react';
+import { View, ActivityIndicator, Text, Platform } from 'react-native';
+import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
@@ -7,7 +8,7 @@ import { createStackNavigator } from '@react-navigation/stack';
 import { Ionicons } from '@expo/vector-icons';
 import * as Notifications from 'expo-notifications';
 import { colors } from './src/constants/colors';
-import { useNotifications, useAuth } from './src/hooks';
+import { useNotifications, useAuth, BetsProvider } from './src/hooks';
 import { navigationRef } from './src/services/notificationService';
 
 // Screens
@@ -24,21 +25,22 @@ import AddChoiceModal from './src/components/AddChoiceModal';
 import { LanguageProvider, useTranslation } from './src/contexts/LanguageContext';
 import { AuthProvider } from './src/contexts/AuthContext';
 
-// Configure notifications
-Notifications.setNotificationHandler({
-  handleNotification: async () => ({
-    shouldShowAlert: true,
-    shouldPlaySound: true,
-    shouldSetBadge: true,
-    shouldShowBanner: true,
-    shouldShowList: true,
-  }),
-});
+if (Platform.OS !== 'web') {
+  Notifications.setNotificationHandler({
+    handleNotification: async () => ({
+      shouldShowAlert: true,
+      shouldPlaySound: true,
+      shouldSetBadge: true,
+      shouldShowBanner: true,
+      shouldShowList: true,
+    }),
+  });
+}
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
 
-function MainTabs({ onLogout, navigation }: { onLogout: () => void; navigation: any }) {
+function MainTabs({ navigation }: { navigation: any }) {
   const [modalVisible, setModalVisible] = useState(false);
   const { t } = useTranslation();
 
@@ -76,9 +78,7 @@ function MainTabs({ onLogout, navigation }: { onLogout: () => void; navigation: 
           }}
         />
         <Tab.Screen name="Stats" component={StatsScreen} options={{ tabBarLabel: t('stats') }} />
-        <Tab.Screen name="Settings" options={{ tabBarLabel: t('settings') }}>
-          {(props) => <SettingsScreen {...props} onLogout={onLogout} />}
-        </Tab.Screen>
+        <Tab.Screen name="Settings" component={SettingsScreen} options={{ tabBarLabel: t('settings') }} />
       </Tab.Navigator>
 
       <AddChoiceModal
@@ -101,24 +101,27 @@ function AppContent() {
   if (loading) {
     return (
       <View style={{ flex: 1, backgroundColor: colors.background, justifyContent: 'center', alignItems: 'center' }}>
-        {/* Loading state while checking session */}
+        <ActivityIndicator size="large" color={colors.accent} />
+        <Text style={{ color: colors.textSecondary, marginTop: 12, fontSize: 14 }}>Loading...</Text>
       </View>
     );
   }
 
-  if (!user) {
-    return <LoginScreen onLogin={() => {}} />;
-  }
-
   return (
     <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="MainTabs">
-          {(props) => <MainTabs {...props} onLogout={() => {}} />}
-        </Stack.Screen>
-        <Stack.Screen name="BetDetail" component={BetDetailScreen} />
-        <Stack.Screen name="ScanTicket" component={ScanTicketScreen} />
-        <Stack.Screen name="AddBet" component={AddBetScreen} />
+      <Stack.Navigator key={user ? 'app' : 'auth'} screenOptions={{ headerShown: false }}>
+        {user ? (
+          <>
+            <Stack.Screen name="MainTabs">
+              {(props) => <MainTabs {...props} />}
+            </Stack.Screen>
+            <Stack.Screen name="BetDetail" component={BetDetailScreen} />
+            <Stack.Screen name="ScanTicket" component={ScanTicketScreen} />
+            <Stack.Screen name="AddBet" component={AddBetScreen} />
+          </>
+        ) : (
+          <Stack.Screen name="Login" component={LoginScreen} />
+        )}
       </Stack.Navigator>
     </NavigationContainer>
   );
@@ -126,12 +129,16 @@ function AppContent() {
 
 export default function App() {
   return (
-    <LanguageProvider>
-      <AuthProvider>
-        <SafeAreaProvider>
-          <AppContent />
-        </SafeAreaProvider>
-      </AuthProvider>
-    </LanguageProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <LanguageProvider>
+        <AuthProvider>
+          <BetsProvider>
+            <SafeAreaProvider>
+              <AppContent />
+            </SafeAreaProvider>
+          </BetsProvider>
+        </AuthProvider>
+      </LanguageProvider>
+    </GestureHandlerRootView>
   );
 }

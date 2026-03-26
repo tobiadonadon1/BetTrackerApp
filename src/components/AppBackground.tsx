@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useMemo } from 'react';
-import { View, StyleSheet, Dimensions, Animated } from 'react-native';
+import { View, StyleSheet, Dimensions, Animated, Platform } from 'react-native';
 import { LinearGradient } from 'expo-linear-gradient';
 import { colors } from '../constants/colors';
 
@@ -16,24 +16,62 @@ interface Star {
   size: number;
   baseOpacity: number;
   twinkle: boolean;
-  speed: number;
-  driftX: number;
-  driftY: number;
+  color?: string;
 }
 
-const generateStarfield = (): Star[] => {
+const generateBackgroundStars = (): Star[] => {
   const stars: Star[] = [];
-  for (let i = 0; i < 60; i++) {
-    const r = rand(i * 7 + 3);
+  const count = 35;
+  for (let i = 0; i < count; i++) {
+    const r = rand(i * 11 + 3);
     stars.push({
-      x: rand(i * 7) * width,
-      y: rand(i * 7 + 1) * height,
-      size: r < 0.7 ? 1 : r < 0.92 ? 1.5 : 2,
-      baseOpacity: 0.3 + rand(i * 7 + 2) * 0.5,
+      x: rand(i * 13) * width,
+      y: rand(i * 17) * height,
+      size: r < 0.85 ? (0.6 + rand(i * 21) * 0.4) : 1.2,
+      baseOpacity: 0.15 + rand(i * 19) * 0.35,
       twinkle: r > 0.6,
-      speed: 8000 + rand(i * 7 + 4) * 16000,
-      driftX: (rand(i * 7 + 5) - 0.5) * 30,
-      driftY: (rand(i * 7 + 6) - 0.5) * 20,
+      color: 'rgba(210, 230, 255, 1)',
+    });
+  }
+  return stars;
+};
+
+const generateMilkyWayStars = (): Star[] => {
+  const stars: Star[] = [];
+  const numBandStars = 80;
+
+  const diagLength = Math.sqrt(width * width + height * height) || 1000;
+  const dirX = (width || 800) / diagLength;
+  const dirY = (height || 600) / diagLength;
+
+  const perpX = -dirY;
+  const perpY = dirX;
+
+  for (let i = 0; i < numBandStars; i++) {
+    const t = rand(i * 101);
+    const lengthPos = -diagLength * 0.2 + t * (diagLength * 1.4);
+
+    const spreadNorm = (rand(i * 103) + rand(i * 107) + rand(i * 109)) / 3 - 0.5;
+    const currentBandWidth = 160 + Math.sin(t * Math.PI) * 80;
+    const spreadDistance = spreadNorm * currentBandWidth;
+
+    const x = (dirX * lengthPos) + (perpX * spreadDistance);
+    const y = (dirY * lengthPos) + (perpY * spreadDistance);
+
+    const r = rand(i * 113);
+    const starColor = r < 0.5
+      ? 'rgba(220, 235, 255, 1)'
+      : r < 0.8
+        ? 'rgba(190, 215, 245, 1)'
+        : 'rgba(245, 230, 240, 1)';
+
+    stars.push({
+      x,
+      y,
+      size: r < 0.9 ? (0.4 + rand(i * 127) * 0.5) : (1.0 + rand(i * 127) * 0.4),
+      baseOpacity: 0.08 + rand(i * 131) * 0.3,
+      twinkle: r > 0.5,
+      color: starColor,
     });
   }
   return stars;
@@ -41,67 +79,25 @@ const generateStarfield = (): Star[] => {
 
 function TwinklingStar({ star }: { star: Star }) {
   const opacity = useRef(new Animated.Value(star.baseOpacity)).current;
-  const translateX = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     if (star.twinkle) {
       Animated.loop(
         Animated.sequence([
           Animated.timing(opacity, {
-            toValue: Math.min(star.baseOpacity + 0.5, 1),
-            duration: 800 + rand(star.x) * 1200,
-            useNativeDriver: true,
+            toValue: Math.min(star.baseOpacity + 0.25, 0.7),
+            duration: 1500 + rand(star.x) * 2500,
+            useNativeDriver: Platform.OS !== 'web',
           }),
           Animated.timing(opacity, {
-            toValue: star.baseOpacity * 0.4,
-            duration: 1000 + rand(star.y) * 1500,
-            useNativeDriver: true,
+            toValue: Math.max(star.baseOpacity * 0.3, 0.04),
+            duration: 2000 + rand(star.y) * 2500,
+            useNativeDriver: Platform.OS !== 'web',
           }),
-          Animated.delay(rand(star.x + star.y) * 3000),
+          Animated.delay(rand(star.x + star.y) * 2000),
         ])
       ).start();
     }
-
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(translateX, {
-          toValue: star.driftX,
-          duration: star.speed,
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateX, {
-          toValue: -star.driftX * 0.6,
-          duration: star.speed * 0.8,
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateX, {
-          toValue: 0,
-          duration: star.speed * 0.5,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
-
-    Animated.loop(
-      Animated.sequence([
-        Animated.timing(translateY, {
-          toValue: star.driftY,
-          duration: star.speed * 0.9,
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: -star.driftY * 0.7,
-          duration: star.speed * 0.7,
-          useNativeDriver: true,
-        }),
-        Animated.timing(translateY, {
-          toValue: 0,
-          duration: star.speed * 0.6,
-          useNativeDriver: true,
-        }),
-      ])
-    ).start();
   }, []);
 
   return (
@@ -113,100 +109,24 @@ function TwinklingStar({ star }: { star: Star }) {
         width: star.size * 2,
         height: star.size * 2,
         borderRadius: star.size,
-        backgroundColor: 'rgba(200, 220, 255, 1)',
+        backgroundColor: star.color,
         opacity,
-        transform: [{ translateX }, { translateY }],
       }}
     />
   );
 }
 
-function LightRay({ angle, x, delay }: { angle: number; x: number; delay: number }) {
-  const opacity = useRef(new Animated.Value(0)).current;
-  const translateX = useRef(new Animated.Value(0)).current;
-
-  useEffect(() => {
-    Animated.loop(
-      Animated.sequence([
-        Animated.delay(delay),
-        Animated.parallel([
-          Animated.timing(opacity, {
-            toValue: 0.12,
-            duration: 3000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(translateX, {
-            toValue: 20,
-            duration: 6000,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.parallel([
-          Animated.timing(opacity, {
-            toValue: 0,
-            duration: 3000,
-            useNativeDriver: true,
-          }),
-          Animated.timing(translateX, {
-            toValue: -20,
-            duration: 6000,
-            useNativeDriver: true,
-          }),
-        ]),
-        Animated.delay(2000),
-      ])
-    ).start();
-  }, []);
-
-  return (
-    <Animated.View
-      style={{
-        position: 'absolute',
-        left: x,
-        top: -height * 0.1,
-        width: 2,
-        height: height * 1.4,
-        opacity,
-        transform: [
-          { rotate: `${angle}deg` },
-          { translateX },
-        ],
-      }}
-    >
-      <LinearGradient
-        colors={[
-          'transparent',
-          'rgba(135, 206, 235, 0.4)',
-          'rgba(135, 206, 235, 0.15)',
-          'transparent',
-        ]}
-        style={{ flex: 1, width: 2 }}
-        start={{ x: 0.5, y: 0 }}
-        end={{ x: 0.5, y: 1 }}
-      />
-    </Animated.View>
-  );
-}
-
 export default function AppBackground() {
-  const stars = useMemo(() => generateStarfield(), []);
+  const stars = useMemo(() => [...generateBackgroundStars(), ...generateMilkyWayStars()], []);
 
   return (
-    <View style={StyleSheet.absoluteFill} pointerEvents="none">
-      {/* Dark gradient base */}
+    <View style={[StyleSheet.absoluteFill, { pointerEvents: 'none' }]}>
       <LinearGradient
-        colors={[colors.background, '#091526', '#060e1c']}
+        colors={['#0E2247', colors.background, '#060E1F']}
         style={StyleSheet.absoluteFill}
         start={{ x: 0.5, y: 0 }}
         end={{ x: 0.5, y: 1 }}
       />
-
-      {/* Subtle light rays */}
-      <LightRay angle={25} x={width * 0.3} delay={0} />
-      <LightRay angle={-18} x={width * 0.7} delay={3000} />
-      <LightRay angle={12} x={width * 0.5} delay={6000} />
-
-      {/* Twinkling stars */}
       {stars.map((star, i) => (
         <TwinklingStar key={i} star={star} />
       ))}

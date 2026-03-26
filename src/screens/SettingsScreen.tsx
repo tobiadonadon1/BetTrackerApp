@@ -9,11 +9,12 @@ import {
   Modal,
   ActivityIndicator,
   Linking,
-  Platform
+  Platform,
+  TextInput,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../constants/colors';
-import { useAuth } from '../hooks';
+import { useAuth, useBankroll } from '../hooks';
 import { useTranslation } from '../contexts/LanguageContext';
 import { Language } from '../utils/i18n';
 import AppBackground from '../components/AppBackground';
@@ -21,14 +22,14 @@ import PageHeader from '../components/PageHeader';
 import authService from '../services/authService';
 import betService from '../services/betService';
 
-interface SettingsScreenProps {
-  onLogout: () => void;
-}
-
-export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
-  const { user, signOut } = useAuth();
+export default function SettingsScreen() {
+  const { user, signOut, isGuest } = useAuth();
   const { language, setLanguage, t } = useTranslation();
+  const { settings: bankrollSettings, isConfigured, currentBalance, saveBankroll, unitSize1Pct, unitSize2Pct, changePercent } = useBankroll();
   const [langModalVisible, setLangModalVisible] = useState(false);
+  const [bankrollModalVisible, setBankrollModalVisible] = useState(false);
+  const [bankrollInput, setBankrollInput] = useState('');
+  const [bankrollSaving, setBankrollSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   const handleLanguageChange = (lang: Language) => {
@@ -47,7 +48,6 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
       const confirm = window.confirm('Are you sure you want to logout?');
       if (confirm) {
         await signOut();
-        onLogout();
       }
     } else {
       Alert.alert(
@@ -57,7 +57,6 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
           { text: 'Cancel', style: 'cancel' },
           { text: 'Logout', style: 'destructive', onPress: async () => {
             await signOut();
-            onLogout();
           }},
         ]
       );
@@ -66,7 +65,7 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
 
   const handleResetPassword = async () => {
     if (!user?.email) return;
-    
+
     if (Platform.OS === 'web') {
       const confirm = window.confirm(`Send a password reset email to ${user.email}?`);
       if (confirm) {
@@ -135,10 +134,34 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
     }
   };
 
+  const handleSaveBankroll = async () => {
+    const value = parseFloat(bankrollInput);
+    if (!value || value <= 0) {
+      Alert.alert('Error', 'Please enter a valid bankroll amount');
+      return;
+    }
+    setBankrollSaving(true);
+    try {
+      await saveBankroll(value);
+      setBankrollModalVisible(false);
+      setBankrollInput('');
+      Alert.alert('Success', 'Bankroll saved!');
+    } catch (error: any) {
+      Alert.alert('Error', error.message || 'Failed to save bankroll');
+    } finally {
+      setBankrollSaving(false);
+    }
+  };
+
+  const openBankrollModal = () => {
+    setBankrollInput(bankrollSettings?.initialBankroll?.toString() || '');
+    setBankrollModalVisible(true);
+  };
+
   const SettingItem = ({ icon, title, subtitle, value, onPress, disabled }: any) => (
-    <TouchableOpacity 
-      style={[styles.settingItem, disabled && !value && { opacity: 0.5 }]} 
-      onPress={onPress} 
+    <TouchableOpacity
+      style={[styles.settingItem, disabled && !value && { opacity: 0.5 }]}
+      onPress={onPress}
       disabled={disabled || !onPress}
     >
       <View style={styles.settingIcon}>
@@ -166,7 +189,7 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
       <PageHeader title="Settings" />
 
       <ScrollView contentContainerStyle={styles.content}>
-        
+
         <SectionTitle title="Account Info" />
         <View style={styles.section}>
           <SettingItem
@@ -181,6 +204,58 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
             value={user?.email || 'Unknown'}
             disabled
           />
+        </View>
+
+        {/* Bankroll Section */}
+        <SectionTitle title="Bankroll" />
+        <View style={styles.section}>
+          {isConfigured ? (
+            <>
+              <View style={styles.bankrollCard}>
+                <View style={styles.bankrollRow}>
+                  <View>
+                    <Text style={styles.bankrollLabel}>Current Balance</Text>
+                    <Text style={styles.bankrollValue}>${currentBalance?.toFixed(2) || '0.00'}</Text>
+                  </View>
+                  <View style={styles.bankrollChangeWrap}>
+                    <Text style={[styles.bankrollChange, { color: changePercent >= 0 ? colors.success : colors.error }]}>
+                      {changePercent >= 0 ? '+' : ''}{changePercent.toFixed(1)}%
+                    </Text>
+                  </View>
+                </View>
+                <View style={styles.bankrollDivider} />
+                <View style={styles.bankrollRow}>
+                  <View>
+                    <Text style={styles.bankrollSmallLabel}>Initial Bankroll</Text>
+                    <Text style={styles.bankrollSmallValue}>${bankrollSettings?.initialBankroll.toFixed(0)}</Text>
+                  </View>
+                  <View>
+                    <Text style={styles.bankrollSmallLabel}>Unit Size (1-2%)</Text>
+                    <Text style={styles.bankrollSmallValue}>${unitSize1Pct.toFixed(0)} – ${unitSize2Pct.toFixed(0)}</Text>
+                  </View>
+                </View>
+              </View>
+              <SettingItem
+                icon="create-outline"
+                title="Edit Bankroll"
+                subtitle="Change your initial bankroll amount"
+                onPress={openBankrollModal}
+              />
+            </>
+          ) : (
+            <TouchableOpacity style={styles.bankrollCTA} onPress={openBankrollModal} disabled={isGuest}>
+              <View style={[styles.settingIcon, { backgroundColor: colors.accent + '20' }]}>
+                <Ionicons name="wallet-outline" size={22} color={colors.accent} />
+              </View>
+              <View style={styles.settingContent}>
+                <Text style={styles.settingTitle}>Set Up Bankroll</Text>
+                <Text style={styles.settingSubtitle}>
+                  {isGuest ? 'Sign in to track your bankroll' : 'Set your starting bankroll to track performance'}
+                </Text>
+              </View>
+              <Ionicons name="add-circle" size={24} color={colors.accent} />
+            </TouchableOpacity>
+          )}
         </View>
 
         <SectionTitle title={t('settings') || "Preferences"} />
@@ -203,14 +278,14 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
           <SettingItem
             icon="lock-closed-outline"
             title="Reset Password"
-            subtitle="Send a password recovery email"
+            subtitle={isGuest ? 'Sign in to reset password' : 'Send a password recovery email'}
             onPress={handleResetPassword}
-            disabled={isLoading}
+            disabled={isLoading || isGuest}
           />
-          <TouchableOpacity 
-            style={[styles.settingItem, styles.dangerItem]} 
+          <TouchableOpacity
+            style={[styles.settingItem, styles.dangerItem]}
             onPress={clearAllData}
-            disabled={isLoading}
+            disabled={isLoading || isGuest}
           >
             <View style={[styles.settingIcon, { backgroundColor: colors.error + '20' }]}>
               <Ionicons name="trash-outline" size={22} color={colors.error} />
@@ -251,8 +326,8 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
           />
         </View>
 
-        <TouchableOpacity 
-          style={styles.logoutButton} 
+        <TouchableOpacity
+          style={styles.logoutButton}
           onPress={handleLogout}
           disabled={isLoading}
         >
@@ -263,6 +338,7 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
         <Text style={styles.footerText}>BETRA v1.0.0</Text>
       </ScrollView>
 
+      {/* Language Modal */}
       <Modal
         visible={langModalVisible}
         transparent
@@ -293,25 +369,72 @@ export default function SettingsScreen({ onLogout }: SettingsScreenProps) {
           </View>
         </View>
       </Modal>
+
+      {/* Bankroll Modal */}
+      <Modal
+        visible={bankrollModalVisible}
+        transparent
+        animationType="slide"
+        onRequestClose={() => setBankrollModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeader}>
+              <Text style={styles.modalTitle}>
+                {isConfigured ? 'Edit Bankroll' : 'Set Up Bankroll'}
+              </Text>
+              <TouchableOpacity onPress={() => setBankrollModalVisible(false)}>
+                <Ionicons name="close" size={24} color={colors.textPrimary} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.bankrollModalLabel}>Initial Bankroll Amount ($)</Text>
+            <TextInput
+              style={styles.bankrollModalInput}
+              value={bankrollInput}
+              onChangeText={setBankrollInput}
+              placeholder="e.g. 1000"
+              placeholderTextColor={colors.textMuted}
+              keyboardType="decimal-pad"
+              autoFocus
+            />
+            <Text style={styles.bankrollModalHint}>
+              This is your starting balance. We recommend betting 1-2% per bet.
+            </Text>
+
+            <TouchableOpacity
+              style={[styles.bankrollModalSaveBtn, bankrollSaving && { opacity: 0.6 }]}
+              onPress={handleSaveBankroll}
+              disabled={bankrollSaving}
+            >
+              {bankrollSaving ? (
+                <ActivityIndicator color={colors.primary} />
+              ) : (
+                <Text style={styles.bankrollModalSaveText}>Save</Text>
+              )}
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: colors.background },
-  content: { padding: 16, paddingBottom: 40 },
-  sectionTitle: { fontSize: 13, fontWeight: '600', color: colors.textMuted, marginTop: 24, marginBottom: 8, marginLeft: 8, textTransform: 'uppercase' },
-  section: { backgroundColor: colors.surface, borderRadius: 16, overflow: 'hidden' },
-  settingItem: { flexDirection: 'row', alignItems: 'center', padding: 16, borderBottomWidth: 1, borderBottomColor: colors.border },
+  content: { paddingHorizontal: 16, paddingTop: 8, paddingBottom: 40 },
+  sectionTitle: { fontSize: 11, fontWeight: '600', color: colors.textMuted, marginTop: 20, marginBottom: 8, marginLeft: 4, textTransform: 'uppercase', letterSpacing: 0.5 },
+  section: { backgroundColor: colors.surface, borderRadius: 14, overflow: 'hidden' },
+  settingItem: { flexDirection: 'row', alignItems: 'center', padding: 14, borderBottomWidth: 1, borderBottomColor: 'rgba(45, 74, 111, 0.5)' },
   dangerItem: { borderBottomWidth: 0 },
-  settingIcon: { width: 36, height: 36, borderRadius: 10, backgroundColor: colors.accent + '20', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
+  settingIcon: { width: 34, height: 34, borderRadius: 9, backgroundColor: colors.accent + '18', justifyContent: 'center', alignItems: 'center', marginRight: 12 },
   settingContent: { flex: 1 },
-  settingTitle: { fontSize: 16, fontWeight: '600', color: colors.textPrimary },
-  settingSubtitle: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  settingValue: { fontSize: 14, color: colors.textMuted },
-  logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderRadius: 16, padding: 16, marginTop: 24 },
-  logoutText: { fontSize: 16, fontWeight: '600', color: colors.textPrimary, marginLeft: 8 },
-  footerText: { textAlign: 'center', color: colors.textMuted, marginTop: 24, fontSize: 12 },
+  settingTitle: { fontSize: 15, fontWeight: '600', color: colors.textPrimary },
+  settingSubtitle: { fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  settingValue: { fontSize: 13, color: colors.textMuted },
+  logoutButton: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', backgroundColor: colors.surface, borderRadius: 14, padding: 14, marginTop: 20 },
+  logoutText: { fontSize: 15, fontWeight: '600', color: colors.textPrimary, marginLeft: 8 },
+  footerText: { textAlign: 'center', color: colors.textMuted, marginTop: 20, fontSize: 11 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: colors.background, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
   modalHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 },
@@ -321,4 +444,93 @@ const styles = StyleSheet.create({
   langFlag: { fontSize: 24, marginRight: 12 },
   langName: { flex: 1, fontSize: 16, color: colors.textPrimary },
   langNameActive: { fontWeight: 'bold' },
+
+  // Bankroll card
+  bankrollCard: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+  },
+  bankrollRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  bankrollLabel: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: 2,
+  },
+  bankrollValue: {
+    fontSize: 24,
+    fontWeight: '700',
+    color: colors.textPrimary,
+  },
+  bankrollChangeWrap: {
+    backgroundColor: 'rgba(74, 222, 128, 0.1)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  bankrollChange: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  bankrollDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+    marginVertical: 12,
+  },
+  bankrollSmallLabel: {
+    fontSize: 11,
+    color: colors.textMuted,
+    marginBottom: 2,
+  },
+  bankrollSmallValue: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textSecondary,
+  },
+  bankrollCTA: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 16,
+  },
+
+  // Bankroll modal
+  bankrollModalLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+    marginBottom: 8,
+  },
+  bankrollModalInput: {
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    padding: 14,
+    color: colors.textPrimary,
+    borderWidth: 1,
+    borderColor: colors.border,
+    fontSize: 18,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  bankrollModalHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginBottom: 20,
+    lineHeight: 18,
+  },
+  bankrollModalSaveBtn: {
+    backgroundColor: colors.accent,
+    borderRadius: 12,
+    padding: 16,
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  bankrollModalSaveText: {
+    fontWeight: 'bold',
+    color: colors.primary,
+    fontSize: 16,
+  },
 });

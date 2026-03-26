@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useRef } from 'react';
 import {
   View,
   Text,
@@ -6,9 +6,12 @@ import {
   TouchableOpacity,
   Modal,
   Animated,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../constants/colors';
+
+const USE_NATIVE = Platform.OS !== 'web';
 
 interface AddChoiceModalProps {
   visible: boolean;
@@ -25,13 +28,13 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
     if (visible) {
       Animated.spring(slideAnim, {
         toValue: 0,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE,
       }).start();
     } else {
       Animated.timing(slideAnim, {
         toValue: 300,
         duration: 200,
-        useNativeDriver: true,
+        useNativeDriver: USE_NATIVE,
       }).start();
     }
   }, [visible]);

@@ -1,7 +1,36 @@
 import { supabase, BetRow } from '../config/supabase';
-import { Bet, BetCategory, BetType, BetStatus, BetSelection } from '../types';
+import {
+  Bet,
+  BetCategory,
+  BetType,
+  BetMarket,
+  BetStatus,
+  BetSelection,
+  BetSource,
+  OddsFormat,
+} from '../types';
+
+export interface BetRealtimeChange {
+  eventType: 'INSERT' | 'UPDATE' | 'DELETE';
+  bet?: Bet;
+  betId?: string;
+}
 
 class BetService {
+  private normalizeSelections(
+    rawSelections: BetSelection[] | null,
+    fallbackMarket: BetMarket,
+    fallbackFormat: OddsFormat,
+  ): BetSelection[] {
+    if (!rawSelections?.length) return [];
+    return rawSelections.map(sel => ({
+      ...sel,
+      oddsFormat: sel.oddsFormat || fallbackFormat,
+      market: sel.market || fallbackMarket,
+      kickoff: sel.kickoff || null,
+    }));
+  }
+
   private mapRowToBet(row: BetRow): Bet {
     return {
       id: row.id,
@@ -9,23 +38,38 @@ class BetService {
       bookmaker: row.bookmaker,
       stake: row.stake,
       totalOdds: row.total_odds,
+      oddsFormat: row.odds_format as OddsFormat,
       potentialWin: row.potential_win,
       status: row.status as BetStatus,
       date: row.date,
-      selections: row.selections as BetSelection[],
+      selections: this.normalizeSelections(
+        row.selections as BetSelection[],
+        (row.market || 'other') as BetMarket,
+        (row.odds_format || 'decimal') as OddsFormat,
+      ),
       notes: row.notes || undefined,
       category: row.category as BetCategory,
       betType: row.bet_type as BetType,
+      market: (row.market || 'other') as BetMarket,
+      league: row.league || undefined,
+      source: (row.source || 'manual') as BetSource,
+      archived: !!row.archived,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
     };
   }
 
-  private mapBetToRow(bet: Omit<Bet, 'id'>, userId: string): Omit<BetRow, 'id' | 'created_at' | 'updated_at'> {
+  private mapBetToRow(
+    bet: Omit<Bet, 'id' | 'createdAt' | 'updatedAt'>,
+    userId: string,
+  ): Omit<BetRow, 'id' | 'created_at' | 'updated_at'> {
     return {
       user_id: userId,
       title: bet.title,
       bookmaker: bet.bookmaker,
       stake: bet.stake,
       total_odds: bet.totalOdds,
+      odds_format: bet.oddsFormat,
       potential_win: bet.potentialWin,
       status: bet.status,
       date: bet.date,
@@ -33,6 +77,10 @@ class BetService {
       notes: bet.notes || null,
       category: bet.category,
       bet_type: bet.betType,
+      market: bet.market || 'other',
+      league: bet.league || null,
+      source: bet.source,
+      archived: bet.archived ?? false,
     };
   }
 
@@ -76,7 +124,7 @@ class BetService {
     return data ? this.mapRowToBet(data) : null;
   }
 
-  async createBet(bet: Omit<Bet, 'id'>): Promise<Bet> {
+  async createBet(bet: Omit<Bet, 'id' | 'createdAt' | 'updatedAt'>): Promise<Bet> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.user) {
       throw new Error('Not authenticated');
@@ -107,12 +155,17 @@ class BetService {
     if (updates.stake !== undefined) updateData.stake = updates.stake;
     if (updates.totalOdds !== undefined) updateData.total_odds = updates.totalOdds;
     if (updates.potentialWin !== undefined) updateData.potential_win = updates.potentialWin;
+    if (updates.oddsFormat) updateData.odds_format = updates.oddsFormat;
     if (updates.status) updateData.status = updates.status;
     if (updates.date) updateData.date = updates.date;
     if (updates.selections) updateData.selections = updates.selections;
     if (updates.notes !== undefined) updateData.notes = updates.notes;
     if (updates.category) updateData.category = updates.category;
     if (updates.betType) updateData.bet_type = updates.betType;
+    if (updates.market) updateData.market = updates.market;
+    if (updates.league !== undefined) updateData.league = updates.league || null;
+    if (updates.source) updateData.source = updates.source;
+    if (updates.archived !== undefined) updateData.archived = updates.archived;
 
     const { error } = await supabase
       .from('bets')
@@ -163,14 +216,22 @@ class BetService {
   }
 
   // Subscribe to real-time changes
-  subscribeToBets(callback: (bet: Bet) => void) {
+  subscribeToBets(callback: (change: BetRealtimeChange) => void) {
     return supabase
       .channel('bets')
       .on(
         'postgres_changes',
         { event: '*', schema: 'public', table: 'bets' },
         (payload) => {
-          callback(this.mapRowToBet(payload.new as BetRow));
+          if (payload.eventType === 'DELETE') {
+            callback({ eventType: 'DELETE', betId: String((payload.old as BetRow).id) });
+            return;
+          }
+
+          callback({
+            eventType: payload.eventType as 'INSERT' | 'UPDATE',
+            bet: this.mapRowToBet(payload.new as BetRow),
+          });
         }
       )
       .subscribe();

@@ -4,6 +4,7 @@ import { createNavigationContainerRef } from '@react-navigation/native';
 import { supabase } from '../config/supabase';
 
 export const navigationRef = createNavigationContainerRef<any>();
+const WEB_VAPID_PUBLIC_KEY = (process.env.EXPO_PUBLIC_VAPID_PUBLIC_KEY || '').trim();
 
 class NotificationService {
   /**
@@ -11,6 +12,10 @@ class NotificationService {
    */
   async initialize(): Promise<boolean> {
     try {
+      if (Platform.OS === 'web' && !WEB_VAPID_PUBLIC_KEY) {
+        return false;
+      }
+
       // Request permissions
       const { status: existingStatus } = await Notifications.getPermissionsAsync();
       let finalStatus = existingStatus;
@@ -54,7 +59,10 @@ class NotificationService {
    */
   async getPushToken(): Promise<string | null> {
     try {
-      const { data } = await Notifications.getExpoPushTokenAsync();
+      const options = Platform.OS === 'web' && WEB_VAPID_PUBLIC_KEY
+        ? { vapidPublicKey: WEB_VAPID_PUBLIC_KEY }
+        : undefined;
+      const { data } = await Notifications.getExpoPushTokenAsync(options as any);
       return data;
     } catch (error) {
       console.error('Failed to get push token:', error);

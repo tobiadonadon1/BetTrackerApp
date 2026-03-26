@@ -8,8 +8,7 @@ import {
   Image,
   ActivityIndicator,
   Animated,
-  ScrollView,
-  TextInput,
+  Platform,
 } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
 import * as ImagePicker from 'expo-image-picker';
@@ -31,7 +30,6 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   const [capturedImage, setCapturedImage] = useState<string | null>(null);
   const [scanning, setScanning] = useState(false);
   const [flashAnim] = useState(new Animated.Value(0));
-  const [extractedData, setExtractedData] = useState<any>(null);
   const cameraRef = useRef<CameraView>(null);
   const { createBet } = useBets();
 
@@ -42,13 +40,18 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
     }
   }, [mode]);
 
+  useEffect(() => {
+    if (!capturedImage || scanning) return;
+    processImage();
+  }, [capturedImage]);
+
   const pickImage = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.8,
+        quality: 0.6, // Keeps file size under OCR.space 1MB free-tier limit
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -67,11 +70,11 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
     if (cameraRef.current) {
       try {
         Animated.sequence([
-          Animated.timing(flashAnim, { toValue: 0.8, duration: 50, useNativeDriver: true }),
-          Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: true }),
+          Animated.timing(flashAnim, { toValue: 0.8, duration: 50, useNativeDriver: Platform.OS !== 'web' }),
+          Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: Platform.OS !== 'web' }),
         ]).start();
 
-        const photo = await cameraRef.current.takePictureAsync({ quality: 0.8 });
+        const photo = await cameraRef.current.takePictureAsync({ quality: 0.6 });
         if (photo) {
           setCapturedImage(photo.uri);
         }
@@ -83,156 +86,92 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
 
   const processImage = async () => {
     if (!capturedImage) return;
-    
+
     setScanning(true);
-    
+
     try {
-      // Real OCR extraction using Google Vision API
       const extracted = await ocrService.extractBetData(capturedImage);
-      setExtractedData({
-        title: extracted.title,
+
+      const hasMultipleSelections = extracted.selections && extracted.selections.length > 1;
+      const betType = hasMultipleSelections ? (extracted.betType || 'parlay') : 'single';
+      const selections = (hasMultipleSelections ? extracted.selections : [{
+        event: extracted.title,
+        selection: extracted.title,
+        odds: extracted.odds,
+        category: extracted.selections[0]?.category || 'Other',
+        market: extracted.market,
+        league: extracted.league,
+        kickoff: undefined,
+      }]).map((selection, index) => ({
+        id: `${Date.now()}-${index}`,
+        event: selection.event,
+        selection: selection.selection,
+        odds: selection.odds,
+        oddsFormat: 'decimal' as const,
+        status: 'pending' as const,
+        category: selection.category,
+        market: selection.market,
+        kickoff: selection.kickoff || null,
+      }));
+
+      const commonLeague = extracted.league || selections
+        .map(selection => selection.event.split(' — ')[0])
+        .find(Boolean);
+
+      const createdBet = await createBet({
+        title: hasMultipleSelections ? `Parlay (${selections.length} legs)` : extracted.title,
         bookmaker: extracted.bookmaker,
         stake: extracted.stake,
-        odds: extracted.odds,
-        detectedLang: extracted.detectedLang,
-      });
-      setScanning(false);
-    } catch (error: any) {
-      setScanning(false);
-      const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
-      Alert.alert('Error', isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to analyze image. Please try again or enter manually.');
-    }
-  };
-
-  const confirmAndSave = async () => {
-    if (!extractedData) return;
-    
-    try {
-      const potentialWin = extractedData.stake * extractedData.odds;
-      await createBet({
-        title: extractedData.title,
-        bookmaker: extractedData.bookmaker,
-        stake: extractedData.stake,
-        totalOdds: extractedData.odds,
-        potentialWin: potentialWin,
+        totalOdds: extracted.odds,
+        oddsFormat: 'decimal',
+        potentialWin: extracted.potentialWin,
         status: 'pending',
-        date: new Date().toISOString().split('T')[0],
-        selections: [{
-          id: Date.now().toString(),
-          event: extractedData.title,
-          selection: 'Auto-extracted',
-          odds: extractedData.odds,
-          status: 'pending',
-          category: 'Other',
-        }],
-        category: 'Other',
-        betType: 'single',
+        date: new Date().toISOString(),
+        selections,
+        category: selections[0]?.category || 'Other',
+        betType,
+        market: extracted.market,
+        league: commonLeague || undefined,
+        source: mode === 'gallery' ? 'scan-gallery' : 'scan-camera',
       });
-      
-      Alert.alert('✅ Success', 'Bet added!', [
-        { text: 'View Bets', onPress: () => navigation.navigate('Home') },
-      ]);
+
+      navigation.replace('BetDetail', { betId: createdBet.id, selectionIndex: 0 });
     } catch (error: any) {
-      const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
-      Alert.alert('Error', isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to save bet. Please try again.');
+      setScanning(false);
+      const msg = error.message || '';
+      const isNetwork = msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network');
+      Alert.alert(
+        'Extraction Failed',
+        isNetwork
+          ? 'Network connection failed. Please check your internet.'
+          : msg || 'Could not extract data from this image. Please try again or enter manually.',
+        [
+          { text: 'Try Again', onPress: retake },
+          { text: 'Enter Manually', onPress: () => navigation.navigate('AddBet') },
+        ]
+      );
     }
   };
 
   const retake = () => {
     setCapturedImage(null);
-    setExtractedData(null);
+    setScanning(false);
     if (mode === 'gallery') {
       pickImage();
     }
   };
 
-  // Show extracted data review
-  if (extractedData && capturedImage) {
-    return (
-      <View style={styles.container}>
-        <View style={[styles.header, { paddingTop: Math.max(insets.top + 10, 50) }]}>
-          <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-            <Ionicons name="close" size={28} color={colors.textPrimary} />
-          </TouchableOpacity>
-          <Text style={styles.headerTitle}>Review Extracted Data</Text>
-          <View style={{ width: 44 }} />
-        </View>
-        
-        <ScrollView style={styles.reviewScroll}>
-          <Image source={{ uri: capturedImage }} style={styles.reviewImage} />
-          
-          <View style={styles.dataCard}>
-            <Text style={styles.dataTitle}>Detected Bet Details</Text>
-            <Text style={styles.dataSubtitle}>Language: {extractedData.detectedLang}</Text>
-            
-            <View style={styles.dataRow}>
-              <Text style={styles.dataLabel}>Event</Text>
-              <TextInput
-                style={styles.dataInput}
-                value={extractedData.title}
-                onChangeText={(t) => setExtractedData({ ...extractedData, title: t })}
-              />
-            </View>
-            <View style={styles.dataRow}>
-              <Text style={styles.dataLabel}>Bookmaker</Text>
-              <TextInput
-                style={styles.dataInput}
-                value={extractedData.bookmaker}
-                onChangeText={(t) => setExtractedData({ ...extractedData, bookmaker: t })}
-              />
-            </View>
-            <View style={styles.dataRow}>
-              <Text style={styles.dataLabel}>Stake</Text>
-              <TextInput
-                style={styles.dataInput}
-                value={String(extractedData.stake)}
-                keyboardType="numeric"
-                onChangeText={(t) => setExtractedData({ ...extractedData, stake: parseFloat(t) || 0 })}
-              />
-            </View>
-            <View style={styles.dataRow}>
-              <Text style={styles.dataLabel}>Odds</Text>
-              <TextInput
-                style={styles.dataInput}
-                value={String(extractedData.odds)}
-                keyboardType="numeric"
-                onChangeText={(t) => setExtractedData({ ...extractedData, odds: parseFloat(t) || 0 })}
-              />
-            </View>
-            <View style={styles.dataRow}>
-              <Text style={styles.dataLabel}>Potential Win</Text>
-              <Text style={[styles.dataValue, { color: colors.success }]}>
-                ${(extractedData.stake * extractedData.odds).toFixed(2)}
-              </Text>
-            </View>
-          </View>
-        </ScrollView>
-        
-        <View style={styles.reviewButtons}>
-          <TouchableOpacity style={[styles.reviewButton, styles.retakeButton]} onPress={retake}>
-            <Ionicons name="refresh" size={20} color={colors.textPrimary} />
-            <Text style={styles.reviewButtonText}>Retake</Text>
-          </TouchableOpacity>
-          <TouchableOpacity style={[styles.reviewButton, styles.confirmButton]} onPress={confirmAndSave}>
-            <Ionicons name="checkmark" size={20} color={colors.primary} />
-            <Text style={[styles.reviewButtonText, { color: colors.primary }]}>Confirm & Save</Text>
-          </TouchableOpacity>
-        </View>
-      </View>
-    );
-  }
-
   // Show captured image preview (before OCR)
   if (capturedImage) {
     return (
       <View style={styles.container}>
-        <Animated.View style={[styles.flashOverlay, { opacity: flashAnim }]} pointerEvents="none" />
+        <Animated.View style={[styles.flashOverlay, { opacity: flashAnim, pointerEvents: 'none' }]} />
         
         <View style={[styles.header, { paddingTop: Math.max(insets.top + 10, 50) }]}>
           <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
             <Ionicons name="close" size={28} color={colors.textPrimary} />
           </TouchableOpacity>
-          <Text style={styles.headerTitle}>Review Ticket</Text>
+          <Text style={styles.headerTitle}>Processing Ticket</Text>
           <View style={{ width: 44 }} />
         </View>
         
@@ -244,24 +183,11 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
               <View style={styles.scanningBox}>
                 <ActivityIndicator size="large" color={colors.accent} />
                 <Text style={styles.scanningText}>Analyzing ticket...</Text>
-                <Text style={styles.scanningSubtext}>Reading text in any language</Text>
+                <Text style={styles.scanningSubtext}>Extracting legs, odds, market, and kickoff</Text>
               </View>
             </View>
           )}
         </View>
-        
-        {!scanning && (
-          <View style={styles.actionButtons}>
-            <TouchableOpacity style={[styles.actionButton, styles.retakeButton]} onPress={retake}>
-              <Ionicons name="refresh" size={24} color={colors.textPrimary} />
-              <Text style={styles.actionButtonText}>Retake</Text>
-            </TouchableOpacity>
-            <TouchableOpacity style={[styles.actionButton, styles.confirmButton]} onPress={processImage}>
-              <Ionicons name="scan" size={24} color={colors.primary} />
-              <Text style={[styles.actionButtonText, { color: colors.primary }]}>Extract Data</Text>
-            </TouchableOpacity>
-          </View>
-        )}
       </View>
     );
   }
@@ -321,7 +247,7 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
       
       <View style={styles.cameraWrapper}>
         <CameraView ref={cameraRef} style={styles.camera} facing="back" />
-        <View style={styles.overlay} pointerEvents="none">
+        <View style={[styles.overlay, { pointerEvents: 'none' }]}>
           <View style={styles.scanFrame}>
             <View style={styles.frameCorners}>
               <View style={[styles.corner, styles.topLeft]} />

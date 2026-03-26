@@ -11,6 +11,7 @@ import {
   SafeAreaView,
   Image,
   Alert,
+  ActivityIndicator,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -19,38 +20,66 @@ import AppBackground from '../components/AppBackground';
 import { colors } from '../constants/colors';
 import authService from '../services/authService';
 
-interface LoginScreenProps {
-  onLogin: () => void;
-}
-
-export default function LoginScreen({ onLogin }: LoginScreenProps) {
+export default function LoginScreen() {
   const [isLogin, setIsLogin] = useState(true);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [passwordVisible, setPasswordVisible] = useState(false);
   const [username, setUsername] = useState('');
+  const [submitting, setSubmitting] = useState(false);
   const { signIn, signUp } = useAuth();
 
   const handleAuth = async () => {
+    const normalizedEmail = email.trim().toLowerCase();
+    const cleanedUsername = username.trim();
+
+    if (!normalizedEmail) {
+      Alert.alert('Error', 'Please enter your email');
+      return;
+    }
+
+    if (!password) {
+      Alert.alert('Error', 'Please enter your password');
+      return;
+    }
+
+    if (!isLogin && !cleanedUsername) {
+      Alert.alert('Error', 'Please choose a username');
+      return;
+    }
+
     try {
+      setSubmitting(true);
+
       if (isLogin) {
-        await signIn(email, password);
+        await signIn(normalizedEmail, password);
       } else {
-        await signUp(email, password, username);
+        const result = await signUp(normalizedEmail, password, cleanedUsername);
+        if (result.requiresEmailConfirmation) {
+          setIsLogin(true);
+          setPassword('');
+          Alert.alert(
+            'Confirm your email',
+            `We sent a confirmation link to ${result.email}. Confirm it, then log in.`,
+          );
+        }
       }
-      onLogin();
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Authentication failed');
+    } finally {
+      setSubmitting(false);
     }
   };
 
   const handleForgotPassword = async () => {
-    if (!email) {
+    const normalizedEmail = email.trim().toLowerCase();
+
+    if (!normalizedEmail) {
       Alert.alert('Error', 'Please enter your email to reset the password');
       return;
     }
     try {
-      await authService.resetPassword(email);
+      await authService.resetPassword(normalizedEmail);
       Alert.alert('Email Sent', 'Check your inbox for the password reset link.');
     } catch (e: any) {
       Alert.alert('Error', e.message || 'Failed to send reset email.');
@@ -86,6 +115,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
             <TouchableOpacity
               style={[styles.tab, isLogin && styles.tabActive]}
               onPress={() => setIsLogin(true)}
+              disabled={submitting}
             >
               {isLogin && <View style={styles.tabDot} />}
               <Text style={[styles.tabText, isLogin && styles.tabTextActive]}>Login</Text>
@@ -93,6 +123,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
             <TouchableOpacity
               style={[styles.tab, !isLogin && styles.tabActive]}
               onPress={() => setIsLogin(false)}
+              disabled={submitting}
             >
               {!isLogin && <View style={styles.tabDot} />}
               <Text style={[styles.tabText, !isLogin && styles.tabTextActive]}>Sign Up</Text>
@@ -105,12 +136,13 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
               <View style={styles.inputGroup}>
                 <Text style={styles.inputLabel}>Username</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, Platform.OS === 'web' ? styles.webInputReset : null]}
                   placeholder="Enter username"
                   placeholderTextColor="rgba(255,255,255,0.4)"
                   value={username}
                   onChangeText={setUsername}
                   autoCapitalize="none"
+                  editable={!submitting}
                 />
               </View>
             )}
@@ -118,13 +150,15 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
             <View style={styles.inputGroup}>
               <Text style={styles.inputLabel}>Email</Text>
               <TextInput
-                style={styles.input}
+                style={[styles.input, Platform.OS === 'web' ? styles.webInputReset : null]}
                 placeholder="Enter your email"
                 placeholderTextColor="rgba(255,255,255,0.4)"
                 value={email}
                 onChangeText={setEmail}
                 autoCapitalize="none"
                 keyboardType="email-address"
+                autoCorrect={false}
+                editable={!submitting}
               />
             </View>
 
@@ -132,16 +166,18 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
               <Text style={styles.inputLabel}>Password</Text>
               <View style={styles.passwordContainer}>
                 <TextInput
-                  style={styles.passwordInput}
+                  style={[styles.passwordInput, Platform.OS === 'web' ? styles.webInputReset : null]}
                   placeholder="Enter your password"
                   placeholderTextColor="rgba(255,255,255,0.4)"
                   value={password}
                   onChangeText={setPassword}
                   secureTextEntry={!passwordVisible}
+                  editable={!submitting}
                 />
                 <TouchableOpacity
                   style={styles.eyeButton}
                   onPress={() => setPasswordVisible(!passwordVisible)}
+                  disabled={submitting}
                 >
                   <Ionicons
                     name={passwordVisible ? 'eye-off' : 'eye'}
@@ -154,11 +190,12 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
 
             {/* Submit Button — gradient */}
             <TouchableOpacity 
-              style={styles.buttonWrap} 
+              style={[styles.buttonWrap, submitting && styles.buttonWrapDisabled]} 
               onPress={handleAuth} 
               activeOpacity={0.9}
               accessibilityRole="button"
               accessibilityLabel={isLogin ? 'Login' : 'Create Account'}
+              disabled={submitting}
             >
               <LinearGradient
                 colors={['#5BAAF0', '#4A9FD4', '#3A8BC4']}
@@ -166,9 +203,18 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
                 start={{ x: 0.5, y: 0 }}
                 end={{ x: 0.5, y: 1 }}
               >
-                <Text style={styles.buttonText}>
-                  {isLogin ? 'Login' : 'Create Account'}
-                </Text>
+                {submitting ? (
+                  <View style={styles.buttonLoading}>
+                    <ActivityIndicator size="small" color="#ffffff" />
+                    <Text style={styles.buttonText}>
+                      {isLogin ? 'Signing In...' : 'Creating Account...'}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.buttonText}>
+                    {isLogin ? 'Login' : 'Create Account'}
+                  </Text>
+                )}
               </LinearGradient>
             </TouchableOpacity>
 
@@ -178,6 +224,7 @@ export default function LoginScreen({ onLogin }: LoginScreenProps) {
               onPress={handleForgotPassword}
               accessibilityRole="button"
               accessibilityLabel="Forgot Password"
+              disabled={submitting}
             >
                 <Text style={styles.forgotText}>Forgot password?</Text>
               </TouchableOpacity>
@@ -284,7 +331,6 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: 'rgba(135, 206, 235, 0.35)',
     fontSize: 16,
-    ...(Platform.OS === 'web' && { outlineStyle: 'none' as const }),
   },
   passwordContainer: {
     flexDirection: 'row',
@@ -299,8 +345,8 @@ const styles = StyleSheet.create({
     padding: 16,
     color: '#ffffff',
     fontSize: 16,
-    ...(Platform.OS === 'web' && { outlineStyle: 'none' as const }),
   },
+  webInputReset: Platform.OS === 'web' ? ({ outlineStyle: 'none' } as any) : {},
   eyeButton: {
     padding: 16,
     paddingLeft: 0,
@@ -312,10 +358,18 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
   },
+  buttonWrapDisabled: {
+    opacity: 0.8,
+  },
   button: {
     padding: 16,
     alignItems: 'center',
     borderRadius: 12,
+  },
+  buttonLoading: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
   },
   buttonText: {
     fontWeight: '700',

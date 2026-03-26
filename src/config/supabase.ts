@@ -4,9 +4,12 @@ import { createClient } from '@supabase/supabase-js';
 // Supabase configuration - BETRA Project
 // Use env vars in production; fallback for local dev when .env is not configured
 const SUPABASE_URL = process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://encdegylezyqbitongjk.supabase.co';
-const SUPABASE_ANON_KEY = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuY2RlZ3lsZXp5cWJpdG9uZ2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1MTM1MzksImV4cCI6MjA4NzA4OTUzOX0.Nwom46XItdfSkAKsyLri3Mx31F9umf8xZHyGPZHbe-w';
+const SUPABASE_ANON_KEY =
+  process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY ||
+  process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY ||
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuY2RlZ3lsZXp5cWJpdG9uZ2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1MTM1MzksImV4cCI6MjA4NzA4OTUzOX0.Nwom46XItdfSkAKsyLri3Mx31F9umf8xZHyGPZHbe-w';
 
-if (!process.env.EXPO_PUBLIC_SUPABASE_URL || !process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY) {
+if (!process.env.EXPO_PUBLIC_SUPABASE_URL || (!process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY && !process.env.EXPO_PUBLIC_SUPABASE_PUBLISHABLE_KEY)) {
   console.warn('Using default Supabase config. Set EXPO_PUBLIC_SUPABASE_URL and EXPO_PUBLIC_SUPABASE_ANON_KEY in .env for production.');
 }
 
@@ -39,6 +42,7 @@ type Database = {
           bookmaker: string;
           stake: number;
           total_odds: number;
+          odds_format: 'decimal' | 'american';
           potential_win: number;
           status: 'pending' | 'won' | 'lost' | 'void';
           date: string;
@@ -46,6 +50,10 @@ type Database = {
           notes: string | null;
           category: string;
           bet_type: string;
+          market: string;
+          league: string | null;
+          source: string;
+          archived: boolean;
           created_at: string;
           updated_at: string;
         };

@@ -40,3 +40,9 @@ yarn-error.*
 # generated native folders
 /ios
 /android
+
+# Supabase CLI
+supabase/.temp/
+
+# Optional local tooling
+.claude/

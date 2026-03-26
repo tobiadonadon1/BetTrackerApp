@@ -199,20 +199,17 @@ export default function CommunityScreen() {
             ) : (
               filteredLeaderboard.map(user => (
                 <View key={user.id} style={styles.userCard}>
-                  <View style={styles.rankBadge}>
-                    <Text style={styles.rankText}>#{user.rank}</Text>
-                  </View>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{user.username[0]}</Text>
-                  </View>
-                  <View style={styles.userDetails}>
-                    <Text style={styles.username}>{user.username}</Text>
-                    <Text style={styles.userStats}>{user.winRate}% win • {user.totalBets} bets</Text>
-                  </View>
-                  <View style={styles.userActions}>
-                    <Text style={[styles.profitText, user.profitLoss < 0 && styles.lossText]}>
-                      {user.profitLoss >= 0 ? '+' : ''}${user.profitLoss.toLocaleString()}
-                    </Text>
+                  <View style={styles.userCardTop}>
+                    <View style={styles.rankBadge}>
+                      <Text style={styles.rankText}>#{user.rank}</Text>
+                    </View>
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>{user.username[0]?.toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.userDetails}>
+                      <Text style={styles.username}>{user.username}</Text>
+                      <Text style={styles.userStats}>{user.totalBets} bets</Text>
+                    </View>
                     <TouchableOpacity
                       style={[styles.followBtn, user.isFollowing && styles.followingBtn]}
                       onPress={() => handleFollow(user.id, user.isFollowing)}
@@ -221,6 +218,24 @@ export default function CommunityScreen() {
                         {user.isFollowing ? 'Following' : 'Follow'}
                       </Text>
                     </TouchableOpacity>
+                  </View>
+                  <View style={styles.userStatsRow}>
+                    <View style={styles.userStatCell}>
+                      <Text style={styles.userStatValue}>{user.winRate}%</Text>
+                      <Text style={styles.userStatLabel}>Win Rate</Text>
+                    </View>
+                    <View style={styles.userStatCell}>
+                      <Text style={[styles.userStatValue, { color: user.roi >= 0 ? '#FBBF24' : colors.error }]}>
+                        {user.roi >= 0 ? '+' : ''}{user.roi.toFixed(1)}%
+                      </Text>
+                      <Text style={styles.userStatLabel}>ROI</Text>
+                    </View>
+                    <View style={styles.userStatCell}>
+                      <Text style={[styles.userStatValue, user.profitLoss < 0 && styles.lossText]}>
+                        {user.profitLoss >= 0 ? '+' : ''}${Math.abs(user.profitLoss).toLocaleString()}
+                      </Text>
+                      <Text style={styles.userStatLabel}>P&L</Text>
+                    </View>
                   </View>
                 </View>
               ))
@@ -242,23 +257,38 @@ export default function CommunityScreen() {
             ) : (
               followingUsers.map(user => (
                 <View key={user.id} style={styles.userCard}>
-                  <View style={styles.avatar}>
-                    <Text style={styles.avatarText}>{user.username[0]}</Text>
-                  </View>
-                  <View style={styles.userDetails}>
-                    <Text style={styles.username}>{user.username}</Text>
-                    <Text style={styles.userStats}>{user.winRate}% win • {user.totalBets} bets</Text>
-                  </View>
-                  <View style={styles.userActions}>
-                    <Text style={[styles.profitText, user.profitLoss < 0 && styles.lossText]}>
-                      {user.profitLoss >= 0 ? '+' : ''}${user.profitLoss.toLocaleString()}
-                    </Text>
+                  <View style={styles.userCardTop}>
+                    <View style={styles.avatar}>
+                      <Text style={styles.avatarText}>{user.username[0]?.toUpperCase()}</Text>
+                    </View>
+                    <View style={styles.userDetails}>
+                      <Text style={styles.username}>{user.username}</Text>
+                      <Text style={styles.userStats}>{user.totalBets} bets</Text>
+                    </View>
                     <TouchableOpacity
                       style={[styles.followBtn, styles.followingBtn]}
                       onPress={() => handleFollow(user.id, user.isFollowing)}
                     >
                       <Text style={styles.followingBtnText}>Unfollow</Text>
                     </TouchableOpacity>
+                  </View>
+                  <View style={styles.userStatsRow}>
+                    <View style={styles.userStatCell}>
+                      <Text style={styles.userStatValue}>{user.winRate}%</Text>
+                      <Text style={styles.userStatLabel}>Win Rate</Text>
+                    </View>
+                    <View style={styles.userStatCell}>
+                      <Text style={[styles.userStatValue, { color: user.roi >= 0 ? '#FBBF24' : colors.error }]}>
+                        {user.roi >= 0 ? '+' : ''}{user.roi.toFixed(1)}%
+                      </Text>
+                      <Text style={styles.userStatLabel}>ROI</Text>
+                    </View>
+                    <View style={styles.userStatCell}>
+                      <Text style={[styles.userStatValue, user.profitLoss < 0 && styles.lossText]}>
+                        {user.profitLoss >= 0 ? '+' : ''}${Math.abs(user.profitLoss).toLocaleString()}
+                      </Text>
+                      <Text style={styles.userStatLabel}>P&L</Text>
+                    </View>
                   </View>
                 </View>
               ))
@@ -322,31 +352,32 @@ const styles = StyleSheet.create({
   tabRow: {
     flexDirection: 'row',
     marginHorizontal: 16,
-    marginBottom: 16,
-    backgroundColor: 'rgba(27, 56, 102, 0.5)',
-    borderRadius: 12,
-    padding: 4,
+    marginTop: 6,
+    marginBottom: 12,
+    backgroundColor: 'rgba(27, 56, 102, 0.45)',
+    borderRadius: 10,
+    padding: 3,
   },
-  tab: { flex: 1, paddingVertical: 10, alignItems: 'center', borderRadius: 8 },
-  tabActive: { backgroundColor: 'rgba(135, 206, 235, 0.25)' },
-  tabText: { fontSize: 14, fontWeight: '600', color: colors.textMuted },
+  tab: { flex: 1, paddingVertical: 9, alignItems: 'center', borderRadius: 8 },
+  tabActive: { backgroundColor: 'rgba(74, 159, 212, 0.2)' },
+  tabText: { fontSize: 13, fontWeight: '600', color: colors.textMuted },
   tabTextActive: { color: colors.accent },
 
   timeframeRow: {
     flexDirection: 'row',
-    marginBottom: 16,
+    marginBottom: 12,
     gap: 8,
   },
   timeframeBtn: {
     paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 16,
+    paddingHorizontal: 14,
+    borderRadius: 8,
     borderWidth: 1,
-    borderColor: 'rgba(123, 168, 228, 0.22)',
-    backgroundColor: 'rgba(27, 56, 102, 0.4)',
+    borderColor: 'rgba(123, 168, 228, 0.18)',
+    backgroundColor: 'rgba(27, 56, 102, 0.35)',
   },
   timeframeBtnActive: {
-    backgroundColor: colors.accent + '25',
+    backgroundColor: 'rgba(74, 159, 212, 0.2)',
     borderColor: colors.accent,
   },
   timeframeText: {
@@ -360,85 +391,97 @@ const styles = StyleSheet.create({
 
   quickActions: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 16,
+    gap: 10,
+    marginBottom: 12,
   },
   quickActionBtn: {
     flex: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(27, 56, 102, 0.62)',
-    borderRadius: 14,
-    padding: 14,
+    backgroundColor: 'rgba(27, 56, 102, 0.45)',
+    borderRadius: 12,
+    padding: 12,
     borderWidth: 1,
-    borderColor: 'rgba(123, 168, 228, 0.22)',
+    borderColor: 'rgba(123, 168, 228, 0.15)',
     gap: 10,
   },
   quickActionIcon: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: colors.accent + '25',
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    backgroundColor: 'rgba(74, 159, 212, 0.18)',
     justifyContent: 'center',
     alignItems: 'center',
   },
   quickActionIconAccent: {
     backgroundColor: colors.accent,
   },
-  quickActionText: { fontSize: 15, fontWeight: '700', color: colors.textPrimary, flex: 1 },
+  quickActionText: { fontSize: 14, fontWeight: '600', color: colors.textPrimary, flex: 1 },
   quickActionCount: {
-    fontSize: 18,
-    fontWeight: '800',
+    fontSize: 16,
+    fontWeight: '700',
     color: colors.accent,
   },
 
   searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(27, 56, 102, 0.6)',
+    backgroundColor: 'rgba(27, 56, 102, 0.4)',
     marginBottom: 12,
     paddingHorizontal: 12,
-    borderRadius: 12,
+    borderRadius: 10,
     borderWidth: 1,
-    borderColor: 'rgba(123, 168, 228, 0.2)',
+    borderColor: 'rgba(123, 168, 228, 0.12)',
   },
-  searchInput: { flex: 1, paddingVertical: 12, paddingHorizontal: 8, fontSize: 16, color: colors.textPrimary },
+  searchInput: { flex: 1, paddingVertical: 10, paddingHorizontal: 8, fontSize: 15, color: colors.textPrimary },
 
   userCard: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'rgba(27, 56, 102, 0.62)',
+    backgroundColor: 'rgba(27, 56, 102, 0.45)',
     marginBottom: 10,
-    padding: 14,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(123, 168, 228, 0.22)',
+    borderColor: 'rgba(123, 168, 228, 0.12)',
+    overflow: 'hidden',
+  },
+  userCardTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    paddingBottom: 10,
   },
   rankBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
+    width: 26,
+    height: 26,
+    borderRadius: 13,
     backgroundColor: colors.accent + '25',
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginRight: 8,
+  },
+  rankText: { fontSize: 10, fontWeight: '800', color: colors.accent },
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    backgroundColor: colors.accent,
     justifyContent: 'center',
     alignItems: 'center',
     marginRight: 10,
   },
-  rankText: { fontSize: 11, fontWeight: 'bold', color: colors.accent },
-  avatar: {
-    width: 40,
-    height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.accent,
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginRight: 12,
-  },
-  avatarText: { fontSize: 18, fontWeight: 'bold', color: colors.primary },
+  avatarText: { fontSize: 16, fontWeight: 'bold', color: colors.primary },
   userDetails: { flex: 1 },
   username: { fontSize: 15, fontWeight: 'bold', color: colors.textPrimary },
-  userStats: { fontSize: 12, color: colors.textMuted, marginTop: 2 },
-  userActions: { alignItems: 'flex-end' },
-  profitText: { fontSize: 15, fontWeight: 'bold', color: colors.success, marginBottom: 6 },
+  userStats: { fontSize: 11, color: colors.textMuted, marginTop: 1 },
+  userStatsRow: {
+    flexDirection: 'row',
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(123, 168, 228, 0.1)',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  userStatCell: { flex: 1, alignItems: 'center' },
+  userStatValue: { fontSize: 14, fontWeight: '700', color: colors.success },
+  userStatLabel: { fontSize: 9, fontWeight: '600', color: colors.textMuted, marginTop: 2, textTransform: 'uppercase', letterSpacing: 0.5 },
   lossText: { color: colors.error },
   followBtn: {
     paddingHorizontal: 14,

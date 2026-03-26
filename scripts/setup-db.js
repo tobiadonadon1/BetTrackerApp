@@ -59,6 +59,10 @@ async function setupDatabase() {
         notes text,
         category text not null,
         bet_type text not null,
+        market text not null default 'other' check (market in ('moneyline', 'spread', 'totals', 'other')),
+        league text,
+        source text not null default 'manual',
+        odds_format text not null default 'decimal' check (odds_format in ('decimal','american')),
         created_at timestamp with time zone default timezone('utc'::text, now()) not null,
         updated_at timestamp with time zone default timezone('utc'::text, now()) not null
       );
