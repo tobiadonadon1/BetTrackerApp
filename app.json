@@ -33,9 +33,7 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "eas": {
-        "projectId": "73541ae9-eabf-4a88-aa19-1bb9a4c98893"
-      }
+      "eas": {}
     },
     "owner": "tobiadonadon",
     "plugins": [
