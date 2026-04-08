@@ -21,9 +21,11 @@ import SettingsScreen from './src/screens/SettingsScreen';
 import BetDetailScreen from './src/screens/BetDetailScreen';
 import ScanTicketScreen from './src/screens/ScanTicketScreen';
 import AddChoiceModal from './src/components/AddChoiceModal';
+import PaywallScreen from './src/screens/PaywallScreen';
 
 import { LanguageProvider, useTranslation } from './src/contexts/LanguageContext';
 import { AuthProvider } from './src/contexts/AuthContext';
+import { SubscriptionProvider, useSubscription } from './src/contexts/SubscriptionContext';
 
 if (Platform.OS !== 'web') {
   Notifications.setNotificationHandler({
@@ -92,6 +94,17 @@ function MainTabs({ navigation }: { navigation: any }) {
   );
 }
 
+function PaywallOverlay() {
+  const { paywallVisible, closePaywall, paywallReason } = useSubscription();
+  return (
+    <PaywallScreen
+      visible={paywallVisible}
+      onClose={closePaywall}
+      reason={paywallReason}
+    />
+  );
+}
+
 function AppContent() {
   const { user, loading } = useAuth();
   
@@ -108,22 +121,25 @@ function AppContent() {
   }
 
   return (
-    <NavigationContainer ref={navigationRef}>
-      <Stack.Navigator key={user ? 'app' : 'auth'} screenOptions={{ headerShown: false }}>
-        {user ? (
-          <>
-            <Stack.Screen name="MainTabs">
-              {(props) => <MainTabs {...props} />}
-            </Stack.Screen>
-            <Stack.Screen name="BetDetail" component={BetDetailScreen} />
-            <Stack.Screen name="ScanTicket" component={ScanTicketScreen} />
-            <Stack.Screen name="AddBet" component={AddBetScreen} />
-          </>
-        ) : (
-          <Stack.Screen name="Login" component={LoginScreen} />
-        )}
-      </Stack.Navigator>
-    </NavigationContainer>
+    <>
+      <NavigationContainer ref={navigationRef}>
+        <Stack.Navigator key={user ? 'app' : 'auth'} screenOptions={{ headerShown: false }}>
+          {user ? (
+            <>
+              <Stack.Screen name="MainTabs">
+                {(props) => <MainTabs {...props} />}
+              </Stack.Screen>
+              <Stack.Screen name="BetDetail" component={BetDetailScreen} />
+              <Stack.Screen name="ScanTicket" component={ScanTicketScreen} />
+              <Stack.Screen name="AddBet" component={AddBetScreen} />
+            </>
+          ) : (
+            <Stack.Screen name="Login" component={LoginScreen} />
+          )}
+        </Stack.Navigator>
+      </NavigationContainer>
+      <PaywallOverlay />
+    </>
   );
 }
 
@@ -132,11 +148,13 @@ export default function App() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <LanguageProvider>
         <AuthProvider>
-          <BetsProvider>
-            <SafeAreaProvider>
-              <AppContent />
-            </SafeAreaProvider>
-          </BetsProvider>
+          <SubscriptionProvider>
+            <BetsProvider>
+              <SafeAreaProvider>
+                <AppContent />
+              </SafeAreaProvider>
+            </BetsProvider>
+          </SubscriptionProvider>
         </AuthProvider>
       </LanguageProvider>
     </GestureHandlerRootView>

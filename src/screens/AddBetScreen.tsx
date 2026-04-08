@@ -1,11 +1,13 @@
-import React, { useState, useMemo } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert } from 'react-native';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
 import { BetCategory, BetType, BetMarket, BetSelection, OddsFormat } from '../types';
-import { useBets } from '../hooks';
+import { useBets, useSubscription } from '../hooks';
 import { parseOddsInput, oddsInputFromStored } from '../utils/odds';
+import { useTranslation } from '../contexts/LanguageContext';
+import oddsApiService, { OddsApiEvent } from '../services/oddsApiService';
 
 interface AddBetScreenProps {
   navigation: any;
@@ -13,18 +15,7 @@ interface AddBetScreenProps {
 }
 
 const CATEGORIES: BetCategory[] = ['NBA', 'NFL', 'MLB', 'NHL', 'Soccer', 'Tennis', 'UFC', 'Boxing', 'Golf', 'Other'];
-const BET_TYPES: { value: BetType; label: string }[] = [
-  { value: 'single', label: 'Single' },
-  { value: 'parlay', label: 'Parlay' },
-  { value: 'teaser', label: 'Teaser' },
-  { value: 'round-robin', label: 'Round Robin' },
-];
-const MARKETS: { value: BetMarket; label: string }[] = [
-  { value: 'moneyline', label: 'Moneyline' },
-  { value: 'spread', label: 'Spread' },
-  { value: 'totals', label: 'Totals' },
-  { value: 'other', label: 'Other' },
-];
+const BOOKMAKERS = ['Sisal', 'Better', 'Eplay24', 'GoldBet', 'DomusBet', 'Snai', 'Other'];
 
 interface LegInput {
   id: string;
@@ -42,22 +33,41 @@ const createEmptyLeg = (): LegInput => ({
   category: 'Other',
 });
 
+import SportsbookExplorer from '../components/SportsbookExplorer';
+
 export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
   const insets = useSafeAreaInsets();
-  const { createBet, updateBet } = useBets();
+  const { t } = useTranslation();
+  const { createBet, updateBet, bets } = useBets();
+  const { canUseFeature, isOverLimit, ticketCount, limits, openPaywall, tier } = useSubscription();
   const editingBet = route.params?.bet;
 
   const [betType, setBetType] = useState<BetType>(editingBet?.betType || 'single');
   const [title, setTitle] = useState(editingBet?.title || '');
   const [bookmaker, setBookmaker] = useState(editingBet?.bookmaker || '');
+  const [bookmakerModalVisible, setBookmakerModalVisible] = useState(false);
   const [stake, setStake] = useState(editingBet?.stake?.toString() || '');
   const [odds, setOdds] = useState(() => {
     if (!editingBet) return '';
     return oddsInputFromStored(editingBet.totalOdds, editingBet.oddsFormat ?? 'decimal');
   });
   const [category, setCategory] = useState<BetCategory>(editingBet?.category || 'Other');
-  const [market, setMarket] = useState<BetMarket>(editingBet?.market || 'other');
   const [league, setLeague] = useState(editingBet?.league || '');
+  const [singleSelection, setSingleSelection] = useState(editingBet?.selections?.[0]?.selection || '');
+
+  // Sportsbook Explorer State
+  const [explorerVisible, setExplorerVisible] = useState(false);
+  const [activeLegTarget, setActiveLegTarget] = useState<string | 'single' | null>(null);
+
+  // Pre-fetch some upcoming matches when tab mounts
+  useEffect(() => {
+    oddsApiService.getActiveSports(); // Prefetch sports list
+  }, []);
+
+  const BET_TYPES: { value: BetType; label: string }[] = [
+    { value: 'single', label: t('single') },
+    { value: 'parlay', label: t('parlay') },
+  ];
 
   // Multi-leg state
   const initLegs = (): LegInput[] => {
@@ -113,6 +123,12 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
   };
 
   const handleSave = async () => {
+    // Check ticket limit for free users (not when editing)
+    if (!editingBet && isOverLimit) {
+      openPaywall(`Free plan limit reached (${limits.maxTickets} tickets). Upgrade to save more bets.`);
+      return;
+    }
+
     if (!bookmaker || !stake) {
       Alert.alert('Error', 'Please fill all required fields');
       return;
@@ -157,7 +173,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
           oddsFormat: parsed.format,
           status: 'pending' as const,
           category: leg.category,
-          market,
+          market: 'other',
         }));
         betCategory = selections[0]?.category || 'Other';
         betOddsFormat = 'decimal';
@@ -170,12 +186,12 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         selections = [{
           id: Date.now().toString(),
           event: trimmedTitle,
-          selection: trimmedTitle,
+          selection: singleSelection.trim() || trimmedTitle,
           odds: Number(parsed.decimal.toFixed(4)),
           oddsFormat: parsed.format,
           status: 'pending' as const,
           category,
-          market,
+          market: 'other',
         }];
         betOddsFormat = parsed.format;
       }
@@ -202,7 +218,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         category: betCategory,
         betType,
         selections: selections as BetSelection[],
-        market,
+        market: 'other' as BetMarket,
         league: league.trim() || undefined,
         source: resolvedSource,
       };
@@ -231,14 +247,14 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
           <Ionicons name="arrow-back" size={28} color={colors.textPrimary} />
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{editingBet ? 'Edit Bet' : 'Add Bet'}</Text>
+        <Text style={styles.headerTitle}>{editingBet ? t('editBet') : t('addBet')}</Text>
         <TouchableOpacity
           style={styles.saveButton}
           onPress={handleSave}
           accessibilityRole="button"
           accessibilityLabel="Save Bet"
         >
-          <Text style={styles.saveText}>Save</Text>
+          <Text style={styles.saveText}>{t('save')}</Text>
         </TouchableOpacity>
       </View>
 
@@ -246,27 +262,49 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         {!editingBet && (
           <View style={styles.scanActionsRow}>
             <TouchableOpacity
-              style={[styles.scanTicketButton, styles.scanTicketButtonHalf]}
-              onPress={() => navigation.navigate('ScanTicket', { mode: 'camera' })}
+              style={[styles.scanTicketButton, styles.scanTicketButtonHalf, !canUseFeature('ocrEnabled') && styles.disabledButton]}
+              onPress={() => {
+                if (!canUseFeature('ocrEnabled')) {
+                  openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
+                  return;
+                }
+                navigation.navigate('ScanTicket', { mode: 'camera' });
+              }}
               accessibilityRole="button"
-              accessibilityLabel="Scan Ticket Instantly"
             >
-              <Ionicons name="camera" size={20} color={colors.primary} />
-              <Text style={styles.scanTicketText} numberOfLines={1}>Scan ticket</Text>
+              <Ionicons name="camera" size={20} color={!canUseFeature('ocrEnabled') ? colors.textMuted : colors.primary} />
+              <Text style={[styles.scanTicketText, !canUseFeature('ocrEnabled') && { color: colors.textMuted }]} numberOfLines={1}>{t('scanTicket')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.uploadTicketButton, styles.scanTicketButtonHalf]}
-              onPress={() => navigation.navigate('ScanTicket', { mode: 'gallery' })}
+              style={[styles.uploadTicketButton, styles.scanTicketButtonHalf, !canUseFeature('ocrEnabled') && styles.disabledButton]}
+              onPress={() => {
+                if (!canUseFeature('ocrEnabled')) {
+                  openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
+                  return;
+                }
+                navigation.navigate('ScanTicket', { mode: 'gallery' });
+              }}
               accessibilityRole="button"
-              accessibilityLabel="Upload ticket photo"
             >
               <Ionicons name="images" size={20} color={colors.accent} />
-              <Text style={styles.uploadTicketText} numberOfLines={1}>Upload photo</Text>
+              <Text style={styles.uploadTicketText} numberOfLines={1}>{t('uploadGallery')}</Text>
             </TouchableOpacity>
           </View>
         )}
         {!editingBet && (
-          <Text style={styles.scanHint}>Camera scan or upload from gallery — same review & save flow.</Text>
+          <Text style={styles.scanHint}>{t('scanTicket')} {t('worksAnyLanguage')}</Text>
+        )}
+
+        {/* Subscription inline warnings */}
+        {!editingBet && !canUseFeature('ocrEnabled') && (
+          <Text style={styles.upgradeWarning}>
+            OCR scanning requires Pro. Upgrade to scan tickets →
+          </Text>
+        )}
+        {!editingBet && isOverLimit && (
+          <Text style={styles.upgradeWarning}>
+            Free plan limit reached ({limits.maxTickets} tickets). Upgrade to Pro →
+          </Text>
         )}
 
         {/* Bet Type Selector */}
@@ -285,44 +323,57 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
           ))}
         </View>
 
-        <TextInput
-          style={styles.input}
-          placeholder="Bookmaker *"
-          placeholderTextColor={colors.textMuted}
-          value={bookmaker}
-          onChangeText={setBookmaker}
-        />
-
-        {/* Market Selector */}
-        <Text style={styles.label}>Market</Text>
-        <View style={styles.betTypeContainer}>
-          {MARKETS.map((m) => (
-            <TouchableOpacity
-              key={m.value}
-              style={[styles.betTypeButton, market === m.value && styles.betTypeButtonActive]}
-              onPress={() => setMarket(m.value)}
-            >
-              <Text style={[styles.betTypeText, market === m.value && styles.betTypeTextActive]}>
-                {m.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
-        </View>
+        {/* Bookmaker Modal Picker */}
+        <Text style={styles.label}>{t('bookmaker')} *</Text>
+        <TouchableOpacity 
+          style={styles.input} 
+          onPress={() => setBookmakerModalVisible(true)}
+          activeOpacity={0.8}
+        >
+          <Text style={{ color: bookmaker ? colors.textPrimary : colors.textMuted }}>
+            {bookmaker || t('selectBookmaker')}
+          </Text>
+        </TouchableOpacity>
 
         {/* Single bet fields */}
         {!isMultiLeg && (
           <>
-            <TextInput
-              style={styles.input}
-              placeholder="Bet Title *"
-              placeholderTextColor={colors.textMuted}
-              value={title}
-              onChangeText={setTitle}
-            />
+            <View style={styles.eventRowWrapper}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.label}>{t('event')} *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder={t('searchEvent')}
+                  placeholderTextColor={colors.textMuted}
+                  value={title}
+                  onChangeText={setTitle}
+                />
+              </View>
+              <TouchableOpacity
+                style={styles.browseSportsbookBtnSmall}
+                onPress={() => { setActiveLegTarget('single'); setExplorerVisible(true); }}
+              >
+                <Ionicons name="search" size={20} color={colors.accent} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.row}>
+              <View style={styles.flex1}>
+                <Text style={styles.label}>{t('selection') || 'Selection'} *</Text>
+                <TextInput
+                  style={styles.input}
+                  placeholder={t('egSelection') || 'e.g. Manchester United to Win'}
+                  placeholderTextColor={colors.textMuted}
+                  value={singleSelection}
+                  onChangeText={setSingleSelection}
+                />
+              </View>
+            </View>
+
             <View style={styles.row}>
               <TextInput
                 style={[styles.input, styles.flex1]}
-                placeholder="Stake $"
+                placeholder={`${t('stake')} $`}
                 placeholderTextColor={colors.textMuted}
                 value={stake}
                 onChangeText={setStake}
@@ -330,7 +381,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
               />
               <TextInput
                 style={[styles.input, styles.flex1]}
-                placeholder="Odds"
+                placeholder={t('odds')}
                 placeholderTextColor={colors.textMuted}
                 value={odds}
                 onChangeText={setOdds}
@@ -367,7 +418,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
           <>
             <TextInput
               style={styles.input}
-              placeholder="Stake $ *"
+              placeholder={`${t('stake')} $ *`}
               placeholderTextColor={colors.textMuted}
               value={stake}
               onChangeText={setStake}
@@ -397,24 +448,33 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
                   )}
                 </View>
 
-                <TextInput
-                  style={styles.legInput}
-                  placeholder="Event (e.g. Lakers vs Warriors)"
-                  placeholderTextColor={colors.textMuted}
-                  value={leg.event}
-                  onChangeText={(v) => updateLeg(leg.id, 'event', v)}
-                />
-                <View style={styles.row}>
+                <View style={styles.eventRowWrapper}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    placeholder={t('searchEvent')}
+                    placeholderTextColor={colors.textMuted}
+                    value={leg.event}
+                    onChangeText={(v) => updateLeg(leg.id, 'event', v)}
+                  />
+                  <TouchableOpacity
+                    style={styles.browseSportsbookBtnSmall}
+                    onPress={() => { setActiveLegTarget(leg.id); setExplorerVisible(true); }}
+                  >
+                    <Ionicons name="search" size={20} color={colors.accent} />
+                  </TouchableOpacity>
+                </View>
+
+                <View style={[styles.row, { marginTop: 12 }]}>
                   <TextInput
                     style={[styles.legInput, styles.flex1]}
-                    placeholder="Selection"
+                    placeholder={t('selection') || "Selection"}
                     placeholderTextColor={colors.textMuted}
                     value={leg.selection}
                     onChangeText={(v) => updateLeg(leg.id, 'selection', v)}
                   />
                   <TextInput
                     style={[styles.legInput, { width: 80 }]}
-                    placeholder="Odds"
+                    placeholder={t('odds')}
                     placeholderTextColor={colors.textMuted}
                     value={leg.odds}
                     onChangeText={(v) => updateLeg(leg.id, 'odds', v)}
@@ -448,7 +508,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
                   <Text style={styles.summaryValue}>@{calculatedTotalOdds.toFixed(2)}</Text>
                 </View>
                 <View style={styles.summaryRow}>
-                  <Text style={styles.summaryLabel}>Potential Win</Text>
+                  <Text style={styles.summaryLabel}>{t('potentialWin')}</Text>
                   <Text style={[styles.summaryValue, { color: colors.success }]}>
                     ${potentialWin.toFixed(2)}
                   </Text>
@@ -458,6 +518,53 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
           </>
         )}
       </ScrollView>
+
+      {/* Bookmaker Modal */}
+      <Modal visible={bookmakerModalVisible} animationType="fade" transparent>
+        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setBookmakerModalVisible(false)}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>{t('selectBookmaker')}</Text>
+            <FlatList
+              data={BOOKMAKERS}
+              keyExtractor={item => item}
+              renderItem={({ item }) => (
+                <TouchableOpacity 
+                  style={[styles.modalOption, bookmaker === item && styles.modalOptionActive]}
+                  onPress={() => {
+                    setBookmaker(item);
+                    setBookmakerModalVisible(false);
+                  }}
+                >
+                  <Text style={[styles.modalOptionText, bookmaker === item && styles.modalOptionTextActive]}>
+                    {item}
+                  </Text>
+                  {bookmaker === item && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
+                </TouchableOpacity>
+              )}
+            />
+            <TouchableOpacity style={styles.modalCancel} onPress={() => setBookmakerModalVisible(false)}>
+              <Text style={styles.modalCancelText}>{t('cancel')}</Text>
+            </TouchableOpacity>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      <SportsbookExplorer 
+        visible={explorerVisible}
+        onClose={() => { setExplorerVisible(false); setActiveLegTarget(null); }}
+        onSelectSelection={(eventName, selectionName, selectedOdds) => {
+          if (activeLegTarget === 'single') {
+            setTitle(eventName);
+            setSingleSelection(selectionName);
+            setOdds(String(selectedOdds));
+          } else if (activeLegTarget) {
+            updateLeg(activeLegTarget, 'event', eventName);
+            updateLeg(activeLegTarget, 'selection', selectionName);
+            updateLeg(activeLegTarget, 'odds', String(selectedOdds));
+          }
+        }}
+      />
+
     </View>
   );
 }
@@ -516,4 +623,38 @@ const styles = StyleSheet.create({
   summaryRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 6 },
   summaryLabel: { fontSize: 14, color: colors.textSecondary },
   summaryValue: { fontSize: 16, fontWeight: '700', color: colors.textPrimary },
+  eventRowWrapper: { flexDirection: 'row', alignItems: 'flex-end', gap: 10, marginBottom: 12 },
+  browseSportsbookBtnSmall: {
+    height: 48,
+    width: 48,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(74, 159, 212, 0.15)',
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(74, 159, 212, 0.3)',
+  },
+  
+  // Modal styles 
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { width: '85%', backgroundColor: colors.background, borderRadius: 16, padding: 20, maxHeight: '80%' },
+  modalTitle: { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 16, textAlign: 'center' },
+  modalOption: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
+  modalOptionActive: { backgroundColor: colors.accent },
+  modalOptionText: { fontSize: 16, color: colors.textPrimary },
+  modalOptionTextActive: { color: colors.primary, fontWeight: 'bold' },
+  modalCancel: { marginTop: 20, paddingVertical: 12, alignItems: 'center' },
+  modalCancelText: { color: colors.textMuted, fontSize: 16, fontWeight: '600' },
+  upgradeWarning: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#EF4444',
+    textAlign: 'center',
+    marginBottom: 12,
+    lineHeight: 16,
+  },
+  disabledButton: {
+    opacity: 0.5,
+  },
 });
+

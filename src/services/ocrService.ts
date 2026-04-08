@@ -1,6 +1,6 @@
 import * as FileSystem from 'expo-file-system';
 import { GOOGLE_VISION_API_KEY, GOOGLE_VISION_ENDPOINT } from '../config/ocr';
-import { supabase } from '../config/supabase';
+// supabase import removed as OCR fallback is disabled
 import { BetCategory, BetMarket } from '../types';
 
 export interface OCRSelectionResult {
@@ -86,51 +86,26 @@ class OCRService {
   }
 
   /**
-   * Extract bet data from image.
-   * 1. Try Google Vision API directly (if env key is set)
-   * 2. Try OCR.space free API (no config needed)
-   * 3. Fall back to Supabase Edge Function (server-side OCR)
-   * 4. NEVER returns mock data — shows error instead
+   * Extract bet data from image using Google Vision API.
+   * Throws a clear error if the key is missing or extraction fails.
    */
   async extractBetData(imageUri: string): Promise<OCRExtractionResult> {
     const base64Image = await this.imageToBase64(imageUri);
 
-    // Strategy 1: Direct Google Vision API (if client-side key available)
-    if (GOOGLE_VISION_API_KEY) {
-      try {
-        const text = await this.callGoogleVision(base64Image);
-        if (text) {
-          return this.parseBetData(text);
-        }
-      } catch (error) {
-        console.warn('Direct Vision API failed, trying OCR.space...', error);
-      }
+    // Ensure Google Vision API key is configured
+    if (!GOOGLE_VISION_API_KEY) {
+      throw new Error('Google Vision API key is not configured');
     }
-
-    // Strategy 2: OCR.space free API (works out of the box, no configuration needed)
     try {
-      const text = await this.callOCRSpace(base64Image);
+      const text = await this.callGoogleVision(base64Image);
       if (text) {
         return this.parseBetData(text);
       }
     } catch (error) {
-      console.warn('OCR.space failed, trying Edge Function...', error);
+      console.error('Google Vision OCR failed:', error);
     }
-
-    // Strategy 3: Supabase Edge Function (server-side OCR with configured keys)
-    try {
-      const text = await this.callEdgeFunction(base64Image);
-      if (text) {
-        return this.parseBetData(text);
-      }
-    } catch (error) {
-      console.warn('Edge Function OCR failed:', error);
-    }
-
-    // No fallback to mock data — throw clear error
-    throw new Error(
-      'Could not extract text from this image. Please ensure the image is clear and well-lit, or enter the bet details manually.'
-    );
+    // If Vision fails, throw error
+    throw new Error('Could not extract text from image via Google Vision.');
   }
 
   /**
@@ -158,66 +133,6 @@ class OCRService {
       throw new Error('No text found in image');
     }
     return text;
-  }
-
-  /**
-   * Call OCR.space free API — no API key configuration required
-   * Free tier: 25,000 requests/month, 1MB limit per image
-   */
-  private async callOCRSpace(base64Image: string): Promise<string> {
-    const formData = new FormData();
-    formData.append('base64Image', `data:image/jpeg;base64,${base64Image}`);
-    formData.append('language', 'eng');
-    formData.append('isOverlayRequired', 'false');
-    formData.append('detectOrientation', 'true');
-    formData.append('scale', 'true');
-    formData.append('OCREngine', '2');  // Engine 2 gives better accuracy; falls back gracefully if unavailable
-
-    const response = await fetch('https://api.ocr.space/parse/image', {
-      method: 'POST',
-      headers: { apikey: 'helloworld' },
-      body: formData,
-    });
-
-    if (!response.ok) {
-      throw new Error(`OCR.space HTTP error: ${response.status}`);
-    }
-
-    const data = await response.json();
-
-    if (data.IsErroredOnProcessing) {
-      throw new Error(
-        Array.isArray(data.ErrorMessage)
-          ? data.ErrorMessage[0]
-          : data.ErrorMessage || 'OCR.space processing error'
-      );
-    }
-
-    const text = data.ParsedResults?.[0]?.ParsedText;
-    if (!text?.trim()) {
-      throw new Error('No text extracted from image via OCR.space');
-    }
-
-    return text;
-  }
-
-  /**
-   * Call Supabase Edge Function for server-side OCR
-   */
-  private async callEdgeFunction(base64Image: string): Promise<string> {
-    const { data, error } = await supabase.functions.invoke('ocr-extract', {
-      body: { image: base64Image },
-    });
-
-    if (error) {
-      throw new Error(error.message || 'Edge Function call failed');
-    }
-
-    if (!data?.text) {
-      throw new Error('No text extracted from image');
-    }
-
-    return data.text;
   }
 
   /**

@@ -8,6 +8,8 @@ import { useBets, useNotifications, useLiveScores, useMatchResults } from '../ho
 import { navigationRef } from '../services/notificationService';
 import { formatOddsWithAt } from '../utils/odds';
 import { formatBetDate, getSourceLabel } from '../utils/betFormatting';
+import { useTranslation } from '../contexts/LanguageContext';
+import OverUnderProgressBar from '../components/OverUnderProgressBar';
 
 interface BetDetailScreenProps {
   route: any;
@@ -21,6 +23,7 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
   const { sendBetResultNotification } = useNotifications();
   const { matchBetToScore } = useLiveScores();
   const { getInfo } = useMatchResults(bets);
+  const { t } = useTranslation();
   const bet = bets.find(b => b.id === betId);
   const [initialFetchFinished, setInitialFetchFinished] = useState(false);
   const [selectedLegIndex, setSelectedLegIndex] = useState(routeSelIndex);
@@ -219,15 +222,15 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
 
         <View style={styles.statsCard}>
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Stake</Text>
+            <Text style={styles.statLabel}>{t('stake')}</Text>
             <Text style={styles.statValue}>${bet.stake}</Text>
           </View>
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Odds</Text>
+            <Text style={styles.statLabel}>{t('odds')}</Text>
             <Text style={styles.statValue}>{formatOddsWithAt(bet.totalOdds, bet.oddsFormat)}</Text>
           </View>
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Potential Win</Text>
+            <Text style={styles.statLabel}>{t('potentialWin')}</Text>
             <Text style={styles.statValue}>${bet.potentialWin.toFixed(2)}</Text>
           </View>
           <View style={styles.statRow}>
@@ -235,18 +238,14 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
             <Text style={styles.statValue}>{formatBetDate(bet.date)}</Text>
           </View>
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Status</Text>
+            <Text style={styles.statLabel}>{t('status') || 'Status'}</Text>
             <Text style={[styles.statValue, { color: getStatusColor(bet.status) }]}>
-              {bet.status.toUpperCase()}
+              {bet.status === 'void' ? (t('voidStr') || 'VOID').toUpperCase() : (t(bet.status as any) || bet.status).toUpperCase()}
             </Text>
           </View>
           <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Source</Text>
-            <Text style={styles.statValue}>{getSourceLabel(bet.source)}</Text>
-          </View>
-          <View style={styles.statRow}>
-            <Text style={styles.statLabel}>Market</Text>
-            <Text style={styles.statValue}>{(bet.market || 'other').replace(/^\w/, c => c.toUpperCase())}</Text>
+            <Text style={styles.statLabel}>{t('bookmaker')}</Text>
+            <Text style={styles.statValue}>{bet.bookmaker}</Text>
           </View>
           <View style={[styles.statRow, { borderBottomWidth: 0 }]}>
             <Text style={styles.statLabel}>Category</Text>
@@ -271,6 +270,15 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
             {focusedInfo?.score ? (
               <Text style={styles.focusScore}>Score: {focusedInfo.score}</Text>
             ) : null}
+            {focusedInfo?.overUnderProgress ? (
+              <OverUnderProgressBar
+                currentValue={focusedInfo.overUnderProgress.currentValue}
+                threshold={focusedInfo.overUnderProgress.threshold}
+                direction={focusedInfo.overUnderProgress.direction}
+                statType={focusedInfo.overUnderProgress.statType}
+                isLive={focusedInfo.overUnderProgress.isLive}
+              />
+            ) : null}
           </View>
         )}
 
@@ -283,7 +291,7 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
               <View style={styles.liveScoreHeader}>
                 <View style={styles.liveScoreDot} />
                 <Text style={styles.liveScoreLabel}>
-                  {liveMatch.score.completed ? 'FINAL SCORE' : 'LIVE SCORE'}
+                  {liveMatch.score.completed ? 'FINAL SCORE' : (t('liveScore') || 'LIVE SCORE').toUpperCase()}
                 </Text>
               </View>
               <Text style={styles.liveScoreText}>{liveMatch.display}</Text>
@@ -294,7 +302,7 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
         {/* Multi-leg progress bar */}
         {isMultiLeg && totalLegs > 0 && (
           <View style={styles.progressSection}>
-            <Text style={styles.sectionTitle}>Legs Progress</Text>
+            <Text style={styles.sectionTitle}>{t('legs') || 'Legs'} Progress</Text>
             <View style={styles.progressBarContainer}>
               <View style={styles.progressBar}>
                 {wonLegs > 0 && (
@@ -315,25 +323,25 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
               {wonLegs > 0 && (
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.success }]} />
-                  <Text style={styles.legendText}>{wonLegs} Won</Text>
+                  <Text style={styles.legendText}>{wonLegs} {t('won') || 'Won'}</Text>
                 </View>
               )}
               {lostLegs > 0 && (
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.error }]} />
-                  <Text style={styles.legendText}>{lostLegs} Lost</Text>
+                  <Text style={styles.legendText}>{lostLegs} {t('lost') || 'Lost'}</Text>
                 </View>
               )}
               {voidLegs > 0 && (
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.textMuted }]} />
-                  <Text style={styles.legendText}>{voidLegs} Void</Text>
+                  <Text style={styles.legendText}>{voidLegs} {t('voidStr') || 'Void'}</Text>
                 </View>
               )}
               {pendingLegs > 0 && (
                 <View style={styles.legendItem}>
                   <View style={[styles.legendDot, { backgroundColor: colors.pending }]} />
-                  <Text style={styles.legendText}>{pendingLegs} Pending</Text>
+                  <Text style={styles.legendText}>{pendingLegs} {t('pending') || 'Pending'}</Text>
                 </View>
               )}
             </View>
@@ -372,6 +380,21 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
                   </Text>
 
                   {/* Leg status actions */}
+                  {sel.status === 'pending' && (() => {
+                    const legInfo = getInfo(bet.id, index);
+                    if (legInfo?.overUnderProgress) {
+                      return (
+                        <OverUnderProgressBar
+                          currentValue={legInfo.overUnderProgress.currentValue}
+                          threshold={legInfo.overUnderProgress.threshold}
+                          direction={legInfo.overUnderProgress.direction}
+                          statType={legInfo.overUnderProgress.statType}
+                          isLive={legInfo.overUnderProgress.isLive}
+                        />
+                      );
+                    }
+                    return null;
+                  })()}
                   {sel.status === 'pending' && (
                     <View style={styles.legActions}>
                       <TouchableOpacity

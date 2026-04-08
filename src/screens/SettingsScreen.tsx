@@ -14,7 +14,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../constants/colors';
-import { useAuth, useBankroll } from '../hooks';
+import { useAuth, useBankroll, useSubscription } from '../hooks';
 import { useTranslation } from '../contexts/LanguageContext';
 import { Language } from '../utils/i18n';
 import AppBackground from '../components/AppBackground';
@@ -26,6 +26,7 @@ export default function SettingsScreen() {
   const { user, signOut, isGuest } = useAuth();
   const { language, setLanguage, t } = useTranslation();
   const { settings: bankrollSettings, isConfigured, currentBalance, saveBankroll, unitSize1Pct, unitSize2Pct, changePercent } = useBankroll();
+  const { tier, isTrial, trialDaysLeft, limits, openPaywall, canUseFeature } = useSubscription();
   const [langModalVisible, setLangModalVisible] = useState(false);
   const [bankrollModalVisible, setBankrollModalVisible] = useState(false);
   const [bankrollInput, setBankrollInput] = useState('');
@@ -190,6 +191,44 @@ export default function SettingsScreen() {
 
       <ScrollView contentContainerStyle={styles.content}>
 
+        {/* Subscription Section */}
+        <SectionTitle title="Subscription" />
+        <View style={styles.section}>
+          <View style={styles.subscriptionCard}>
+            <View style={styles.subscriptionHeader}>
+              <View style={styles.subscriptionTierBadge}>
+                <Ionicons
+                  name={tier === 'elite' ? 'diamond' : tier === 'pro' ? 'star' : 'person'}
+                  size={16}
+                  color={tier === 'elite' ? '#A78BFA' : tier === 'pro' ? colors.accent : colors.textMuted}
+                />
+                <Text style={[
+                  styles.subscriptionTierText,
+                  { color: tier === 'elite' ? '#A78BFA' : tier === 'pro' ? colors.accent : colors.textMuted },
+                ]}>
+                  {limits.name}
+                </Text>
+              </View>
+              {isTrial && (
+                <View style={styles.trialBadgeSm}>
+                  <Text style={styles.trialBadgeSmText}>{trialDaysLeft}d trial</Text>
+                </View>
+              )}
+            </View>
+            {tier === 'free' && (
+              <Text style={styles.subscriptionHint}>
+                {limits.maxTickets} ticket limit · 30 day history
+              </Text>
+            )}
+          </View>
+          <SettingItem
+            icon="card-outline"
+            title={tier === 'free' ? 'Upgrade Plan' : 'Manage Subscription'}
+            subtitle={tier === 'free' ? 'Unlock OCR scanning, unlimited history & more' : `${limits.name} — ${limits.priceMonthlyLabel}`}
+            onPress={() => openPaywall()}
+          />
+        </View>
+
         <SectionTitle title="Account Info" />
         <View style={styles.section}>
           <SettingItem
@@ -209,7 +248,7 @@ export default function SettingsScreen() {
         {/* Bankroll Section */}
         <SectionTitle title="Bankroll" />
         <View style={styles.section}>
-          {isConfigured ? (
+          {isConfigured && canUseFeature('bankrollEnabled') ? (
             <>
               <View style={styles.bankrollCard}>
                 <View style={styles.bankrollRow}>
@@ -242,6 +281,20 @@ export default function SettingsScreen() {
                 onPress={openBankrollModal}
               />
             </>
+          ) : !canUseFeature('bankrollEnabled') ? (
+            <TouchableOpacity
+              style={styles.bankrollCTA}
+              onPress={() => openPaywall('Bankroll Management is an Elite feature. Upgrade to track your bankroll.')}
+            >
+              <View style={[styles.settingIcon, { backgroundColor: '#A78BFA20' }]}>
+                <Ionicons name="lock-closed" size={18} color="#A78BFA" />
+              </View>
+              <View style={styles.settingContent}>
+                <Text style={styles.settingTitle}>Bankroll Management</Text>
+                <Text style={styles.settingSubtitle}>Elite feature — Tap to upgrade</Text>
+              </View>
+              <Ionicons name="chevron-forward" size={20} color="#A78BFA" />
+            </TouchableOpacity>
           ) : (
             <TouchableOpacity style={styles.bankrollCTA} onPress={openBankrollModal} disabled={isGuest}>
               <View style={[styles.settingIcon, { backgroundColor: colors.accent + '20' }]}>
@@ -307,12 +360,12 @@ export default function SettingsScreen() {
           <SettingItem
             icon="document-text-outline"
             title="Terms of Service"
-            onPress={() => Linking.openURL('https://example.com/terms')}
+            onPress={() => Linking.openURL('https://encdegylezyqbitongjk.supabase.co/storage/v1/object/public/legal/terms.html')}
           />
           <SettingItem
             icon="shield-checkmark-outline"
             title="Privacy Policy"
-            onPress={() => Linking.openURL('https://example.com/privacy')}
+            onPress={() => Linking.openURL('https://encdegylezyqbitongjk.supabase.co/storage/v1/object/public/legal/privacy.html')}
           />
         </View>
 
@@ -532,5 +585,43 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: colors.primary,
     fontSize: 16,
+  },
+
+  // Subscription styles
+  subscriptionCard: {
+    padding: 16,
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(45, 74, 111, 0.5)',
+  },
+  subscriptionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  subscriptionTierBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  subscriptionTierText: {
+    fontSize: 16,
+    fontWeight: '700',
+    letterSpacing: 0.3,
+  },
+  trialBadgeSm: {
+    backgroundColor: 'rgba(74, 159, 212, 0.15)',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  trialBadgeSmText: {
+    fontSize: 11,
+    fontWeight: '700',
+    color: colors.accent,
+  },
+  subscriptionHint: {
+    fontSize: 12,
+    color: colors.textMuted,
+    marginTop: 6,
   },
 });

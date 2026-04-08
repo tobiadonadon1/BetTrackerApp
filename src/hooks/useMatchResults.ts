@@ -3,6 +3,16 @@ import matchResultsService, { MatchResult, ResolveRequest, resolvePickFromScore 
 import geminiResultsService, { GeminiBatchRequest, GeminiMatchResult } from '../services/geminiResultsService';
 import { loadMatchResultCache, matchCacheKey } from '../services/matchResultCache';
 import { Bet } from '../types';
+import { parseOverUnder, OverUnderInfo, StatType } from '../utils/overUnderParser';
+import footballStatsService, { MatchStats } from '../services/footballStatsService';
+
+export interface OverUnderProgress {
+  currentValue: number;
+  threshold: number;
+  direction: 'over' | 'under';
+  statType: StatType;
+  isLive: boolean;
+}
 
 export interface FlatMatchInfo {
   matchResult: MatchResult | null;
@@ -13,6 +23,7 @@ export interface FlatMatchInfo {
   textColor: string;
   resolvedOutcome: 'won' | 'lost' | null;
   score: string | null;
+  overUnderProgress: OverUnderProgress | null;
 }
 
 const COLORS = {
@@ -86,15 +97,15 @@ function buildInfo(
   if (sel.selStatus === 'won') {
     const score = geminiResult && geminiResult.homeScore >= 0
       ? `${geminiResult.homeScore}-${geminiResult.awayScore}` : null;
-    return { matchResult: oddsResult, geminiResult, smartLabel: 'WON', ...COLORS.won, textColor: COLORS.won.text, resolvedOutcome: 'won', score };
+    return { matchResult: oddsResult, geminiResult, smartLabel: 'WON', ...COLORS.won, textColor: COLORS.won.text, resolvedOutcome: 'won', score, overUnderProgress: null };
   }
   if (sel.selStatus === 'lost') {
     const score = geminiResult && geminiResult.homeScore >= 0
       ? `${geminiResult.homeScore}-${geminiResult.awayScore}` : null;
-    return { matchResult: oddsResult, geminiResult, smartLabel: 'LOST', ...COLORS.lost, textColor: COLORS.lost.text, resolvedOutcome: 'lost', score };
+    return { matchResult: oddsResult, geminiResult, smartLabel: 'LOST', ...COLORS.lost, textColor: COLORS.lost.text, resolvedOutcome: 'lost', score, overUnderProgress: null };
   }
   if (sel.selStatus === 'void') {
-    return { matchResult: oddsResult, geminiResult, smartLabel: 'VOID', ...COLORS.void, textColor: COLORS.void.text, resolvedOutcome: null, score: null };
+    return { matchResult: oddsResult, geminiResult, smartLabel: 'VOID', ...COLORS.void, textColor: COLORS.void.text, resolvedOutcome: null, score: null, overUnderProgress: null };
   }
 
   if (oddsResult) {
@@ -103,22 +114,37 @@ function buildInfo(
       const c = oddsResult.betOutcome === 'won' ? COLORS.won : COLORS.lost;
       return {
         matchResult: oddsResult, geminiResult, smartLabel: oddsResult.betOutcome.toUpperCase(), ...c,
-        textColor: c.text, resolvedOutcome: oddsResult.betOutcome, score,
+        textColor: c.text, resolvedOutcome: oddsResult.betOutcome, score, overUnderProgress: null,
       };
     }
     if (oddsResult.status === 'live') {
       const scoreStr = oddsResult.homeScore !== null ? `${oddsResult.homeScore}-${oddsResult.awayScore}` : null;
       const minute = Math.max(1, Math.floor((Date.now() - new Date(oddsResult.commenceTime).getTime()) / 60000));
+
+      // Try to build Over/Under progress for live matches
+      let ouProgress: OverUnderProgress | null = null;
+      const ouInfo = parseOverUnder(sel.selectionStr);
+      if (ouInfo && ouInfo.source === 'score' && oddsResult.homeScore !== null && oddsResult.awayScore !== null) {
+        const currentTotal = oddsResult.homeScore + (oddsResult.awayScore ?? 0);
+        ouProgress = {
+          currentValue: currentTotal,
+          threshold: ouInfo.threshold,
+          direction: ouInfo.direction,
+          statType: ouInfo.statType,
+          isLive: true,
+        };
+      }
+
       return {
         matchResult: oddsResult, geminiResult, smartLabel: `MIN ${Math.min(minute, 90)}`, ...COLORS.live,
-        textColor: COLORS.live.text, resolvedOutcome: null, score: scoreStr,
+        textColor: COLORS.live.text, resolvedOutcome: null, score: scoreStr, overUnderProgress: ouProgress,
       };
     }
     if (oddsResult.status === 'scheduled') {
       const d = new Date(oddsResult.commenceTime);
       return {
         matchResult: oddsResult, geminiResult, smartLabel: formatScheduledTime(d), ...COLORS.scheduled,
-        textColor: COLORS.scheduled.text, resolvedOutcome: null, score: null,
+        textColor: COLORS.scheduled.text, resolvedOutcome: null, score: null, overUnderProgress: null,
       };
     }
   }
@@ -129,15 +155,29 @@ function buildInfo(
       const score = `${geminiResult.homeScore}-${geminiResult.awayScore}`;
       if (outcome) {
         const c = outcome === 'won' ? COLORS.won : COLORS.lost;
-        return { matchResult: oddsResult, geminiResult, smartLabel: outcome.toUpperCase(), ...c, textColor: c.text, resolvedOutcome: outcome, score };
+        return { matchResult: oddsResult, geminiResult, smartLabel: outcome.toUpperCase(), ...c, textColor: c.text, resolvedOutcome: outcome, score, overUnderProgress: null };
       }
-      return { matchResult: oddsResult, geminiResult, smartLabel: score, ...COLORS.scheduled, textColor: COLORS.scheduled.text, resolvedOutcome: null, score };
+      return { matchResult: oddsResult, geminiResult, smartLabel: score, ...COLORS.scheduled, textColor: COLORS.scheduled.text, resolvedOutcome: null, score, overUnderProgress: null };
     }
     if (geminiResult.minutePlayed && geminiResult.minutePlayed > 0) {
+      // Try to build Over/Under progress for live matches via Gemini data
+      let ouProgress: OverUnderProgress | null = null;
+      const ouInfo = parseOverUnder(sel.selectionStr);
+      if (ouInfo && ouInfo.source === 'score' && geminiResult.homeScore >= 0) {
+        const currentTotal = geminiResult.homeScore + geminiResult.awayScore;
+        ouProgress = {
+          currentValue: currentTotal,
+          threshold: ouInfo.threshold,
+          direction: ouInfo.direction,
+          statType: ouInfo.statType,
+          isLive: true,
+        };
+      }
+
       return {
         matchResult: oddsResult, geminiResult, smartLabel: `MIN ${geminiResult.minutePlayed}`, ...COLORS.live,
         textColor: COLORS.live.text, resolvedOutcome: null,
-        score: `${geminiResult.homeScore}-${geminiResult.awayScore}`,
+        score: `${geminiResult.homeScore}-${geminiResult.awayScore}`, overUnderProgress: ouProgress,
       };
     }
   }
@@ -151,7 +191,7 @@ function buildInfo(
     if (refDate > now) {
       return {
         matchResult: null, geminiResult: null, smartLabel: formatScheduledTime(refDate), ...COLORS.scheduled,
-        textColor: COLORS.scheduled.text, resolvedOutcome: null, score: null,
+        textColor: COLORS.scheduled.text, resolvedOutcome: null, score: null, overUnderProgress: null,
       };
     }
     const hoursAgo = (now.getTime() - refDate.getTime()) / 3600000;
@@ -159,7 +199,7 @@ function buildInfo(
       const minute = estimateLiveMinute(refDate);
       return {
         matchResult: null, geminiResult: null, smartLabel: `MIN ${Math.min(minute, 90)}`, ...COLORS.live,
-        textColor: COLORS.live.text, resolvedOutcome: null, score: null,
+        textColor: COLORS.live.text, resolvedOutcome: null, score: null, overUnderProgress: null,
       };
     }
   }
@@ -167,13 +207,13 @@ function buildInfo(
   if (betDate && !isNaN(betDate.getTime()) && betDate > now) {
     return {
       matchResult: null, geminiResult: null, smartLabel: formatScheduledTime(betDate), ...COLORS.scheduled,
-      textColor: COLORS.scheduled.text, resolvedOutcome: null, score: null,
+      textColor: COLORS.scheduled.text, resolvedOutcome: null, score: null, overUnderProgress: null,
     };
   }
 
   return {
     matchResult: null, geminiResult: null, smartLabel: '…', ...COLORS.scheduled, textColor: COLORS.scheduled.text,
-    resolvedOutcome: null, score: null,
+    resolvedOutcome: null, score: null, overUnderProgress: null,
   };
 }
 
@@ -333,6 +373,7 @@ export function useMatchResults(bets: Bet[]) {
       textColor: COLORS.scheduled.text,
       resolvedOutcome: null,
       score: null,
+      overUnderProgress: null,
     };
   }, [resultMap]);
 

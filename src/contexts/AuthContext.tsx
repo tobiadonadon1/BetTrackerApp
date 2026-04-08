@@ -1,6 +1,5 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import authService, { SignUpResult, User } from '../services/authService';
-import { supabase } from '../config/supabase';
 
 const GUEST_USER: User = { id: 'guest', email: '', username: 'Guest' };
 
@@ -22,13 +21,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const isGuestRef = useRef(false);
 
   useEffect(() => {
-    // Always start on the login screen — clear any stale persisted session
-    supabase.auth.signOut().catch(() => {}).finally(() => {
-      setUser(null);
-      setLoading(false);
-    });
-
-    // No auth-state listener needed: we only trust explicit signIn/signUp calls
+    // Restore session on mount so a previously signed-in user doesn't have to log in again
+    authService.getCurrentUser()
+      .then((u) => setUser(u))
+      .catch(() => setUser(null))
+      .finally(() => setLoading(false));
   }, []);
 
   const signIn = useCallback(async (email: string, password: string) => {
@@ -49,6 +46,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       if (user?.id !== 'guest') {
         await authService.signOut();
+      }
+      // Also log out of RevenueCat
+      try {
+        const revenueCatService = (await import('../services/revenueCatService')).default;
+        await revenueCatService.logout();
+      } catch {
+        // RevenueCat logout is non-critical
       }
     } finally {
       isGuestRef.current = false;

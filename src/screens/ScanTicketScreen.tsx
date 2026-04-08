@@ -15,7 +15,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
-import { useBets } from '../hooks';
+import { useBets, useSubscription } from '../hooks';
 import ocrService from '../services/ocrService';
 
 interface ScanTicketScreenProps {
@@ -32,6 +32,15 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   const [flashAnim] = useState(new Animated.Value(0));
   const cameraRef = useRef<CameraView>(null);
   const { createBet } = useBets();
+  const { canUseFeature, openPaywall } = useSubscription();
+
+  // Gate: redirect to paywall if OCR is not available for this tier
+  useEffect(() => {
+    if (!canUseFeature('ocrEnabled')) {
+      openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
+      navigation.goBack();
+    }
+  }, [canUseFeature, openPaywall, navigation]);
 
   // Auto-launch gallery if in gallery mode
   useEffect(() => {
@@ -51,7 +60,7 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
         allowsEditing: true,
         aspect: [4, 3],
-        quality: 0.6, // Keeps file size under OCR.space 1MB free-tier limit
+        quality: 0.6, // Compressed for fast upload to Google Vision API
       });
 
       if (!result.canceled && result.assets[0]) {

@@ -3,10 +3,11 @@ import { View, Text, StyleSheet, ScrollView, Animated, Dimensions, TouchableOpac
 import { Ionicons } from '@expo/vector-icons';
 import { LineChart, BarChart, PieChart } from 'react-native-gifted-charts';
 import { colors } from '../constants/colors';
-import { useBets, useBankroll, useLiveScores } from '../hooks';
+import { useBets, useBankroll, useLiveScores, useSubscription } from '../hooks';
 import { Bet } from '../types';
 import AppBackground from '../components/AppBackground';
 import PageHeader from '../components/PageHeader';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const CHART_WIDTH = Dimensions.get('window').width - 48;
 const CHART_COLORS = [colors.success, colors.accent, colors.pending, '#A78BFA', '#F472B6', '#34D399', '#FB923C', '#38BDF8'];
@@ -66,7 +67,10 @@ function getProfitOverTime(bets: Bet[]) {
 // Helper: compute ROI stats grouped by a key
 function computeGroupedStats(bets: Bet[], keyFn: (b: Bet) => string) {
   const groups: Record<string, { count: number; wins: number; wagered: number; returned: number }> = {};
-  bets.forEach(b => {
+  // Only include decided bets (won or lost) in statistics
+  const settledBets = bets.filter(b => b.status === 'won' || b.status === 'lost');
+  
+  settledBets.forEach(b => {
     const key = keyFn(b);
     if (!groups[key]) groups[key] = { count: 0, wins: 0, wagered: 0, returned: 0 };
     groups[key].count++;
@@ -90,9 +94,11 @@ function computeGroupedStats(bets: Bet[], keyFn: (b: Bet) => string) {
 }
 
 export default function StatsScreen() {
+  const { t } = useTranslation();
   const { bets } = useBets();
   const { isConfigured, currentBalance, settings: bankrollSettings, history: bankrollHistory, changePercent, unitSize1Pct, unitSize2Pct } = useBankroll();
   const { matchBetToScore } = useLiveScores();
+  const { canUseFeature, openPaywall, tier } = useSubscription();
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -108,11 +114,14 @@ export default function StatsScreen() {
   const lostBets = bets.filter(b => b.status === 'lost');
   const pendingBets = bets.filter(b => b.status === 'pending');
 
-  const winRate = totalBets > 0 ? Math.round((wonBets.length / totalBets) * 100) : 0;
+  const decidedBets = wonBets.length + lostBets.length;
+  const winRate = decidedBets > 0 ? Math.round((wonBets.length / decidedBets) * 100) : 0;
   const totalWagered = bets.reduce((sum, b) => sum + b.stake, 0);
-  const totalWon = wonBets.reduce((sum, b) => sum + b.stake * b.totalOdds, 0);
-  const netProfit = totalWon - totalWagered;
-  const roi = totalWagered > 0 ? ((netProfit / totalWagered) * 100).toFixed(1) : '0.0';
+  const decidedWagered = wonBets.reduce((sum, b) => sum + b.stake, 0) + lostBets.reduce((sum, b) => sum + b.stake, 0);
+  const totalWonProfit = wonBets.reduce((sum, b) => sum + (b.potentialWin - b.stake), 0);
+  const totalLostStake = lostBets.reduce((sum, b) => sum + b.stake, 0);
+  const netProfit = totalWonProfit - totalLostStake;
+  const roi = decidedWagered > 0 ? ((netProfit / decidedWagered) * 100).toFixed(1) : '0.0';
 
   const profitData = getProfitOverTime(bets);
   const perfData = [
@@ -249,7 +258,7 @@ export default function StatsScreen() {
   return (
     <View style={styles.container}>
       <AppBackground />
-      <PageHeader title="Statistics" />
+      <PageHeader title={t('stats')} />
 
       <Animated.View style={[styles.wrapper, { opacity: fadeAnim }]}>
         <ScrollView
@@ -259,28 +268,27 @@ export default function StatsScreen() {
         >
           {/* Hero */}
           <View style={styles.hero}>
-            <Text style={styles.heroLabel}>Net Profit</Text>
+            <Text style={styles.heroLabel}>{t('netPL') || 'Net Profit'}</Text>
             <AnimatedValue
               value={Math.abs(netProfit)}
               prefix={netProfit >= 0 ? '+$' : '-$'}
               color={netProfit >= 0 ? colors.success : colors.error}
             />
-            <Text style={styles.heroSub}>ROI {roi}%</Text>
+            <Text style={styles.heroSub}>{t('roi') || 'ROI'} {roi}%</Text>
           </View>
 
-          {/* Compact stats row */}
           <View style={styles.statsRow}>
             <View style={styles.stat}>
               <Text style={styles.statVal}>{totalBets}</Text>
-              <Text style={styles.statLabel}>Bets</Text>
+              <Text style={styles.statLabel}>{t('totalBets')}</Text>
             </View>
             <View style={styles.stat}>
               <Text style={[styles.statVal, { color: colors.success }]}>{winRate}%</Text>
-              <Text style={styles.statLabel}>Win</Text>
+              <Text style={styles.statLabel}>{t('winRate')}</Text>
             </View>
             <View style={styles.stat}>
               <Text style={styles.statVal}>${totalWagered.toFixed(0)}</Text>
-              <Text style={styles.statLabel}>Wagered</Text>
+              <Text style={styles.statLabel}>{t('stake')}</Text>
             </View>
             <View style={styles.stat}>
               <Text style={styles.statVal}>{avgOdds}x</Text>
@@ -292,19 +300,30 @@ export default function StatsScreen() {
           {insights.length > 0 && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Insights</Text>
-              <View style={styles.insightsCard}>
+              {!canUseFeature('advancedAnalytics') ? (
+                <TouchableOpacity
+                  style={styles.lockedOverlay}
+                  onPress={() => openPaywall('Advanced Insights require Pro. Upgrade to unlock full analytics.')}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="lock-closed" size={22} color="#FBBF24" />
+                  <Text style={styles.lockedText}>Upgrade to Pro to unlock Insights</Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.insightsCard}>
                 {insights.map((ins, i) => (
                   <View key={i} style={styles.insightRow}>
                     <Ionicons name={ins.icon} size={16} color={ins.color} />
                     <Text style={[styles.insightText, { color: ins.color }]}>{ins.text}</Text>
                   </View>
                 ))}
-              </View>
+                </View>
+              )}
             </View>
           )}
 
           {/* Bankroll Curve */}
-          {isConfigured && (
+          {isConfigured && canUseFeature('bankrollEnabled') && (
             <View style={styles.section}>
               <Text style={styles.sectionTitle}>Bankroll Curve</Text>
               <View style={styles.chartCard}>
@@ -373,7 +392,7 @@ export default function StatsScreen() {
 
           {/* Profit over time */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>Profit over time</Text>
+            <Text style={styles.sectionTitle}>{t('profit') || 'Profit over time'}</Text>
             <View style={styles.chartCard}>
               {profitData.length > 1 ? (
                 <LineChart
@@ -409,6 +428,16 @@ export default function StatsScreen() {
           {/* ROI per Sport */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>ROI per Sport</Text>
+            {!canUseFeature('advancedAnalytics') ? (
+              <TouchableOpacity
+                style={styles.lockedOverlay}
+                onPress={() => openPaywall('ROI analytics require Pro. Upgrade to unlock detailed breakdowns.')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="lock-closed" size={22} color="#FBBF24" />
+                <Text style={styles.lockedText}>Upgrade to Pro to unlock ROI analytics</Text>
+              </TouchableOpacity>
+            ) : (
             <View style={styles.chartCard}>
               {sportBarData.length > 0 ? (
                 <>
@@ -421,8 +450,12 @@ export default function StatsScreen() {
                     isAnimated
                     animationDuration={600}
                     hideRules
-                    xAxisThickness={0}
-                    yAxisThickness={0}
+                    xAxisThickness={1}
+                    yAxisThickness={1}
+                    xAxisColor={colors.textMuted}
+                    yAxisColor={colors.textMuted}
+                    yAxisTextStyle={{ color: colors.textPrimary }}
+                    xAxisLabelTextStyle={{ color: colors.textPrimary }}
                     noOfSections={3}
                     maxValue={Math.max(...sportBarData.map(d => d.value), 10) * 1.2}
                     barBorderRadius={4}
@@ -450,6 +483,7 @@ export default function StatsScreen() {
                 </View>
               )}
             </View>
+            )}
           </View>
 
           {/* ROI per Bet Type */}
@@ -467,8 +501,12 @@ export default function StatsScreen() {
                     isAnimated
                     animationDuration={600}
                     hideRules
-                    xAxisThickness={0}
-                    yAxisThickness={0}
+                    xAxisThickness={1}
+                    yAxisThickness={1}
+                    xAxisColor={colors.textMuted}
+                    yAxisColor={colors.textMuted}
+                    yAxisTextStyle={{ color: colors.textPrimary }}
+                    xAxisLabelTextStyle={{ color: colors.textPrimary }}
                     noOfSections={3}
                     maxValue={Math.max(...betTypeBarData.map(d => d.value), 10) * 1.2}
                     barBorderRadius={4}
@@ -512,8 +550,12 @@ export default function StatsScreen() {
                     isAnimated
                     animationDuration={600}
                     hideRules
-                    xAxisThickness={0}
-                    yAxisThickness={0}
+                    xAxisThickness={1}
+                    yAxisThickness={1}
+                    xAxisColor={colors.textMuted}
+                    yAxisColor={colors.textMuted}
+                    yAxisTextStyle={{ color: colors.textPrimary }}
+                    xAxisLabelTextStyle={{ color: colors.textPrimary }}
                     noOfSections={3}
                     maxValue={Math.max(...leagueBarData.map(d => d.value), 10) * 1.2}
                     barBorderRadius={4}
@@ -544,7 +586,7 @@ export default function StatsScreen() {
 
           {/* W / L / P */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>W / L / P</Text>
+            <Text style={styles.sectionTitle}>{t('statsWLP') || 'W / L / P'}</Text>
             <View style={styles.chartCard}>
               {perfData.length > 0 ? (
                 <BarChart
@@ -1036,5 +1078,22 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     textAlign: 'center',
     marginTop: 6,
+  },
+  lockedOverlay: {
+    backgroundColor: 'rgba(22, 42, 78, 0.92)',
+    borderRadius: 14,
+    paddingVertical: 28,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(251, 191, 36, 0.15)',
+    gap: 8,
+  },
+  lockedText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#FBBF24',
+    textAlign: 'center',
   },
 });
