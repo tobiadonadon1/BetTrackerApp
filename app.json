@@ -39,8 +39,7 @@
     },
     "owner": "tobiadonadon",
     "plugins": [
-      "expo-font",
-      "react-native-purchases"
+      "expo-font"
     ]
   }
 }
