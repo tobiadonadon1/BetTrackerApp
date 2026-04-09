@@ -15,10 +15,11 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tobiadonadon.betra",
-      "buildNumber": "1",
+      "buildNumber": "2",
       "infoPlist": {
         "NSCameraUsageDescription": "BETRA needs camera access to scan your bet tickets for automatic data extraction.",
-        "NSPhotoLibraryUsageDescription": "BETRA needs photo library access to scan bet tickets from your saved photos."
+        "NSPhotoLibraryUsageDescription": "BETRA needs photo library access to scan bet tickets from your saved photos.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -33,7 +34,9 @@
       "favicon": "./assets/favicon.png"
     },
     "extra": {
-      "eas": {}
+      "eas": {
+        "projectId": "673b896b-b015-4862-9042-156f1d43bf68"
+      }
     },
     "plugins": [
       "expo-font"
