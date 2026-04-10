@@ -49,9 +49,15 @@ interface SubscriptionContextType {
 
 const SubscriptionContext = createContext<SubscriptionContextType>({} as SubscriptionContextType);
 
+// VIP emails that get full Elite access for free
+const VIP_EMAILS = [
+  'tobia@donadon.com',
+];
+
 export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const isGuest = !user || user.id === 'guest';
+  const isVIP = !!(user?.email && VIP_EMAILS.includes(user.email.toLowerCase()));
 
   const [rcInfo, setRcInfo] = useState<RevenueCatSubscriptionInfo>({
     tier: 'free',
@@ -122,7 +128,8 @@ export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ 
     return unsubscribe;
   }, [isGuest]);
 
-  const tier = rcInfo.tier;
+  // VIP override: grant full Elite access regardless of RevenueCat status
+  const tier = isVIP ? 'elite' : rcInfo.tier;
   const limits = PLANS[tier];
 
   // Map RevenueCat status to our status model

@@ -11,7 +11,7 @@ interface PageHeaderProps {
 export default function PageHeader({ title, subtitle }: PageHeaderProps) {
   const insets = useSafeAreaInsets();
   return (
-    <View style={[styles.container, { paddingTop: Math.max(insets.top + 10, 44) }]}>
+    <View style={[styles.container, { paddingTop: Math.max(insets.top + 24, 50) }]}>
       <Text style={styles.title}>{title}</Text>
       {subtitle && <Text style={styles.subtitle}>{subtitle}</Text>}
     </View>
@@ -25,10 +25,12 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   title: {
-    fontSize: 26,
+    fontSize: 32,
     fontWeight: '800',
+    fontFamily: 'Helvetica',
+    textTransform: 'uppercase',
     color: colors.textPrimary,
-    letterSpacing: 1,
+    letterSpacing: -1.5,
   },
   subtitle: {
     fontSize: 13,

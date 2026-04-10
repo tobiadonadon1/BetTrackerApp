@@ -45,6 +45,7 @@ const Tab = createBottomTabNavigator();
 function MainTabs({ navigation }: { navigation: any }) {
   const [modalVisible, setModalVisible] = useState(false);
   const { t } = useTranslation();
+  const { bottom: bottomInset } = require('react-native-safe-area-context').useSafeAreaInsets();
 
   return (
     <>
@@ -62,7 +63,14 @@ function MainTabs({ navigation }: { navigation: any }) {
           },
           tabBarActiveTintColor: colors.accent,
           tabBarInactiveTintColor: colors.textMuted,
-          tabBarStyle: { backgroundColor: colors.background, borderTopWidth: 1, borderTopColor: colors.border, paddingBottom: 8, paddingTop: 8, height: 70 },
+          tabBarStyle: { 
+            backgroundColor: colors.background, 
+            borderTopWidth: 1, 
+            borderTopColor: colors.border, 
+            paddingBottom: Math.max(bottomInset, 12), 
+            paddingTop: 8, 
+            height: 60 + Math.max(bottomInset, 12) 
+          },
           headerShown: false,
         })}
       >
