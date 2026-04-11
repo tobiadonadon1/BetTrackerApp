@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../constants/colors';
+import { useSubscription } from '../hooks';
 
 const USE_NATIVE = Platform.OS !== 'web';
 
@@ -23,6 +24,7 @@ interface AddChoiceModalProps {
 
 export default function AddChoiceModal({ visible, onClose, onScan, onManual, onGallery }: AddChoiceModalProps) {
   const slideAnim = useRef(new Animated.Value(300)).current;
+  const { canUseFeature, openPaywall } = useSubscription();
 
   React.useEffect(() => {
     if (visible) {
@@ -53,26 +55,48 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
           <Text style={styles.title}>Add New Bet</Text>
           <Text style={styles.subtitle}>Choose how you want to add your bet</Text>
 
-          <TouchableOpacity style={[styles.option, styles.scanOption]} onPress={() => { onClose(); onScan(); }}>
-            <View style={[styles.iconContainer, { backgroundColor: colors.accent }]}>
-              <Ionicons name="camera" size={28} color={colors.primary} />
+          <TouchableOpacity style={[styles.option, styles.scanOption, !canUseFeature('ocrEnabled') && styles.optionDisabled]} onPress={() => {
+            if (!canUseFeature('ocrEnabled')) {
+              onClose();
+              openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
+              return;
+            }
+            onClose(); onScan();
+          }}>
+            <View style={[styles.iconContainer, { backgroundColor: canUseFeature('ocrEnabled') ? colors.accent : colors.surface }]}>
+              <Ionicons name="camera" size={28} color={canUseFeature('ocrEnabled') ? colors.primary : colors.textMuted} />
             </View>
             <View style={styles.optionText}>
               <Text style={styles.optionTitle}>Scan Ticket</Text>
-              <Text style={styles.optionDesc}>Take a photo of your bet ticket</Text>
+              <Text style={styles.optionDesc}>{canUseFeature('ocrEnabled') ? 'Take a photo of your bet ticket' : 'Pro feature — Tap to upgrade'}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            {!canUseFeature('ocrEnabled') ? (
+              <Ionicons name="lock-closed" size={18} color="#FBBF24" />
+            ) : (
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={styles.option} onPress={() => { onClose(); onGallery(); }}>
+          <TouchableOpacity style={[styles.option, !canUseFeature('ocrEnabled') && styles.optionDisabled]} onPress={() => {
+            if (!canUseFeature('ocrEnabled')) {
+              onClose();
+              openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
+              return;
+            }
+            onClose(); onGallery();
+          }}>
             <View style={[styles.iconContainer, { backgroundColor: colors.surface }]}>
-              <Ionicons name="images" size={28} color={colors.accent} />
+              <Ionicons name="images" size={28} color={canUseFeature('ocrEnabled') ? colors.accent : colors.textMuted} />
             </View>
             <View style={styles.optionText}>
               <Text style={styles.optionTitle}>Upload from Gallery</Text>
-              <Text style={styles.optionDesc}>Select existing photo</Text>
+              <Text style={styles.optionDesc}>{canUseFeature('ocrEnabled') ? 'Select existing photo' : 'Pro feature — Tap to upgrade'}</Text>
             </View>
-            <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            {!canUseFeature('ocrEnabled') ? (
+              <Ionicons name="lock-closed" size={18} color="#FBBF24" />
+            ) : (
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            )}
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.option} onPress={() => { onClose(); onManual(); }}>
@@ -144,6 +168,10 @@ const styles = StyleSheet.create({
   scanOption: {
     borderWidth: 2,
     borderColor: colors.accent,
+  },
+  optionDisabled: {
+    opacity: 0.6,
+    borderColor: colors.border,
   },
   iconContainer: {
     width: 56,

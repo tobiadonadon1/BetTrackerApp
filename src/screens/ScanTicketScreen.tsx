@@ -34,17 +34,20 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   const { createBet } = useBets();
   const { canUseFeature, openPaywall } = useSubscription();
 
-  // Gate: redirect to paywall if OCR is not available for this tier
+  // Note: OCR access is already gated in AddChoiceModal and AddBetScreen.
+  // If user somehow gets here without OCR, show paywall and go back gracefully.
   useEffect(() => {
     if (!canUseFeature('ocrEnabled')) {
       openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
-      navigation.goBack();
+      // Delay goBack to avoid state conflicts with the paywall opening
+      const timer = setTimeout(() => navigation.goBack(), 300);
+      return () => clearTimeout(timer);
     }
-  }, [canUseFeature, openPaywall, navigation]);
+  }, []);
 
-  // Auto-launch gallery if in gallery mode
+  // Auto-launch gallery if in gallery mode (only if OCR is available)
   useEffect(() => {
-    if (mode === 'gallery' && !capturedImage) {
+    if (mode === 'gallery' && !capturedImage && canUseFeature('ocrEnabled')) {
       pickImage();
     }
   }, [mode]);

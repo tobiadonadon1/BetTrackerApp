@@ -286,8 +286,8 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
               }}
               accessibilityRole="button"
             >
-              <Ionicons name="images" size={20} color={colors.accent} />
-              <Text style={styles.uploadTicketText} numberOfLines={1}>{t('uploadGallery')}</Text>
+              <Ionicons name="images" size={20} color={!canUseFeature('ocrEnabled') ? colors.textMuted : colors.accent} />
+              <Text style={[styles.uploadTicketText, !canUseFeature('ocrEnabled') && { color: colors.textMuted }]} numberOfLines={1}>{t('uploadGallery')}</Text>
             </TouchableOpacity>
           </View>
         )}
