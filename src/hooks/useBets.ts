@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
+import { Platform } from 'react-native';
 import betService, { BetRealtimeChange } from '../services/betService';
 import bankrollService from '../services/bankrollService';
+import notificationService from '../services/notificationService';
 import { useAuth } from '../contexts/AuthContext';
 import { Bet, BetStatus } from '../types';
 import { useMatchResults } from './useMatchResults';
@@ -218,7 +220,30 @@ export function BetsProvider({ children }: { children: React.ReactNode }) {
         bet.id,
         { selections: updatedSelections, status: nextStatus },
         { trackBankroll: nextStatus !== 'pending' },
-      ).finally(() => {
+      ).then(() => {
+        // Fire a push notification when auto-resolve settles the overall bet
+        if (nextStatus === 'won' || nextStatus === 'lost') {
+          const profit = nextStatus === 'won'
+            ? bet.potentialWin - bet.stake
+            : -bet.stake;
+          try {
+            if (Platform.OS === 'web') {
+              // Web notification fallback
+              if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+                const emoji = nextStatus === 'won' ? '🎉' : '😞';
+                const profitText = profit >= 0 ? `+$${profit.toFixed(2)}` : `-$${Math.abs(profit).toFixed(2)}`;
+                new Notification(`${emoji} Bet ${nextStatus === 'won' ? 'Won' : 'Lost'}!`, {
+                  body: `${bet.title} — ${profitText}`,
+                });
+              }
+            } else {
+              notificationService.sendBetResultNotification(bet.title, nextStatus, profit, bet.id);
+            }
+          } catch (notifErr) {
+            console.warn('[AutoResolve] Failed to send notification:', notifErr);
+          }
+        }
+      }).finally(() => {
         autoResolvingRef.current.delete(bet.id);
       });
     });

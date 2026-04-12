@@ -94,43 +94,71 @@ class OCRService {
 
     // Ensure Google Vision API key is configured
     if (!GOOGLE_VISION_API_KEY) {
-      throw new Error('Google Vision API key is not configured');
+      throw new Error('Google Vision API key is not configured. Please add EXPO_PUBLIC_GOOGLE_VISION_API_KEY to your .env file.');
     }
-    try {
-      const text = await this.callGoogleVision(base64Image);
-      if (text) {
-        return this.parseBetData(text);
-      }
-    } catch (error) {
-      console.error('Google Vision OCR failed:', error);
+
+    // Call Google Vision — let errors propagate with real messages
+    const text = await this.callGoogleVision(base64Image);
+    if (!text || text.trim().length === 0) {
+      throw new Error('No text detected in image. Please ensure the bet ticket is clearly visible and well-lit.');
     }
-    // If Vision fails, throw error
-    throw new Error('Could not extract text from image via Google Vision.');
+
+    console.log('[OCR] Raw text extracted (first 500 chars):', text.substring(0, 500));
+
+    const result = this.parseBetData(text);
+
+    // Validate we got something useful
+    if (!result.title && result.selections.length === 0) {
+      throw new Error('Could not identify any bets in this image. Try a clearer photo or enter manually.');
+    }
+
+    return result;
   }
 
   /**
    * Call Google Vision API directly
    */
   private async callGoogleVision(base64Image: string): Promise<string> {
-    const response = await fetch(`${GOOGLE_VISION_ENDPOINT}?key=${GOOGLE_VISION_API_KEY}`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        requests: [{
-          image: { content: base64Image },
-          features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
-        }],
-      }),
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${GOOGLE_VISION_ENDPOINT}?key=${GOOGLE_VISION_API_KEY}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          requests: [{
+            image: { content: base64Image },
+            features: [{ type: 'DOCUMENT_TEXT_DETECTION', maxResults: 1 }],
+          }],
+        }),
+      });
+    } catch (fetchError: any) {
+      throw new Error(`Network error connecting to Google Vision: ${fetchError.message || 'check your internet connection'}`);
+    }
 
     if (!response.ok) {
-      throw new Error(`Vision API error: ${response.status}`);
+      let detail = '';
+      try {
+        const errBody = await response.json();
+        detail = errBody?.error?.message || JSON.stringify(errBody).substring(0, 200);
+      } catch {
+        detail = `HTTP ${response.status}`;
+      }
+      console.error(`[Vision API Error] HTTP ${response.status}: ${detail}`);
+      throw new Error('Failed to process image. Please try again later.'); // Generic error for UI
     }
 
     const data = await response.json();
+
+    // Check for API-level errors in the response body
+    const apiError = data.responses?.[0]?.error;
+    if (apiError) {
+      console.error(`[Vision API Error in Response]: ${apiError.message || 'unknown error'}`);
+      throw new Error('Failed to process image. Please try again later.'); // Generic error for UI
+    }
+
     const text = data.responses?.[0]?.fullTextAnnotation?.text || '';
     if (!text) {
-      throw new Error('No text found in image');
+      throw new Error('No text found in image. The image may be too blurry, dark, or not contain readable text.');
     }
     return text;
   }
@@ -152,6 +180,7 @@ class OCRService {
       'paddy power', 'pokerstars', 'stake', 'marathon', 'snai',
       'sisal', 'eurobet', 'goldbet', 'lottomatica', 'betclic',
       'sportingbet', 'bovada', 'betonline', '888sport', 'skybet',
+      'better', 'eplay24', 'domusbet',
     ];
     let bookmaker = 'Unknown';
     for (const keyword of bookmakerKeywords) {
@@ -178,13 +207,13 @@ class OCRService {
       }
     }
 
-    // Try to detect multiple events (legs) from the text
+    // --- EVENT DETECTION (multi-pattern) ---
+    // Pattern 1: Classic "Team A vs Team B"
     const eventPattern = /([\w\s.'-]+)\s+(?:vs\.?|v\.s\.|versus|@|-)\s+([\w\s.'-]+)/gi;
     const eventMatches: { event: string; lineIndex: number; context: string[] }[] = [];
     let eventMatch;
     while ((eventMatch = eventPattern.exec(text)) !== null) {
       const event = eventMatch[0].trim();
-      // Avoid duplicates and very short matches
       if (event.length > 5 && !eventMatches.some(e => e.event === event)) {
         const lineIdx = lines.findIndex(l => l.includes(eventMatch![0].trim()));
         const context = lineIdx >= 0
@@ -194,29 +223,85 @@ class OCRService {
       }
     }
 
-    // Extract all odds from the text
-    const allOdds: number[] = [];
-    const oddsRegex = /@\s*(\d+[.,]\d+)|(\d+[.,]\d+)\s*odds|odds[:\s]*(\d+[.,]\d+)|(?:quota|cuota|cote)[:\s]*(\d+[.,]\d+)/gi;
-    let oddsMatch;
-    while ((oddsMatch = oddsRegex.exec(text)) !== null) {
-      const val = parseFloat((oddsMatch[1] || oddsMatch[2] || oddsMatch[3] || oddsMatch[4]).replace(',', '.'));
-      if (val > 1 && val < 1000) {
-        allOdds.push(val);
+    // Pattern 2: If no "vs" found, try lines with " - " or " / " separators (common in Italian/European slips)
+    if (eventMatches.length === 0) {
+      const altSeparators = /^(.{3,30})\s+[-\/]\s+(.{3,30})$/;
+      for (let i = 0; i < lines.length; i++) {
+        const match = lines[i].match(altSeparators);
+        if (match) {
+          const event = lines[i].trim();
+          if (!eventMatches.some(e => e.event === event)) {
+            const context = lines.slice(Math.max(0, i - 1), Math.min(lines.length, i + 3));
+            eventMatches.push({ event, lineIndex: i, context });
+          }
+        }
       }
     }
 
-    // Also try standalone decimal odds patterns (e.g. lines with just "1.85", "2.10")
+    // Pattern 3: If still nothing, look for lines that seem like team/match names
+    // (lines with 2+ capitalized words, not numbers-only, not short labels)
+    if (eventMatches.length === 0) {
+      const teamLinePattern = /^[A-Z][a-zA-Z\s.'-]{4,}$/;
+      const candidateLines = lines.filter(l => 
+        teamLinePattern.test(l) && 
+        !/^\d/.test(l) && 
+        !/^(stake|bet|odds|total|quota|win|loss|puntata|vincita)/i.test(l)
+      );
+      // Group consecutive team-like lines as events
+      for (let i = 0; i < candidateLines.length; i++) {
+        const lineIdx = lines.indexOf(candidateLines[i]);
+        const context = lineIdx >= 0
+          ? lines.slice(Math.max(0, lineIdx - 1), Math.min(lines.length, lineIdx + 3))
+          : [];
+        eventMatches.push({
+          event: candidateLines[i],
+          lineIndex: lineIdx,
+          context,
+        });
+      }
+    }
+
+    // --- ODDS EXTRACTION (comprehensive) ---
+    const allOdds: number[] = [];
+
+    // Pattern A: @-prefixed odds (e.g., "@1.85", "@ 2.10")
+    const atOddsRegex = /@\s*(\d+[.,]\d+)/g;
+    let oddsMatch;
+    while ((oddsMatch = atOddsRegex.exec(text)) !== null) {
+      const val = parseFloat(oddsMatch[1].replace(',', '.'));
+      if (val > 1 && val < 1000 && !allOdds.includes(val)) allOdds.push(val);
+    }
+
+    // Pattern B: Labeled odds ("odds: 1.85", "quota: 2.10", etc.)
+    const labeledOddsRegex = /(?:odds|quota|cuota|cote)[:\s]*(\d+[.,]\d+)/gi;
+    while ((oddsMatch = labeledOddsRegex.exec(text)) !== null) {
+      const val = parseFloat(oddsMatch[1].replace(',', '.'));
+      if (val > 1 && val < 1000 && !allOdds.includes(val)) allOdds.push(val);
+    }
+
+    // Pattern C: Standalone decimal odds on their own line ("1.85", "2.10")
     for (const line of lines) {
-      const standaloneOdds = line.match(/^(\d+[.,]\d{2})$/);
+      const standaloneOdds = line.match(/^(\d+[.,]\d{1,3})$/);
       if (standaloneOdds) {
         const val = parseFloat(standaloneOdds[1].replace(',', '.'));
-        if (val > 1 && val < 100 && !allOdds.includes(val)) {
+        if (val > 1.01 && val < 100 && !allOdds.includes(val)) {
           allOdds.push(val);
         }
       }
     }
 
-    // Build selections if we have multiple events
+    // Pattern D: Odds appearing next to text on the same line (e.g., "Man Utd 1.85")
+    for (const line of lines) {
+      const inlineOdds = line.match(/(\d+[.,]\d{2})\s*$/);
+      if (inlineOdds) {
+        const val = parseFloat(inlineOdds[1].replace(',', '.'));
+        if (val > 1.01 && val < 100 && !allOdds.includes(val)) {
+          allOdds.push(val);
+        }
+      }
+    }
+
+    // --- BUILD SELECTIONS ---
     const selections: OCRSelectionResult[] = [];
 
     if (eventMatches.length > 0) {
@@ -244,16 +329,33 @@ class OCRService {
       }
     }
 
+    // If no events matched but we have odds, create a fallback single bet from context
+    if (selections.length === 0 && allOdds.length > 0) {
+      const title = lines.find(l => l.length > 3 && !/^[\d.,€$£@]+$/.test(l)) || 'Scanned Bet';
+      const leagueData = this.inferLeagueAndCategory(text);
+      selections.push({
+        event: title,
+        selection: title,
+        odds: allOdds[0],
+        category: leagueData.category,
+        market: this.inferMarket(text),
+        league: leagueData.league,
+        kickoff: this.inferKickoff(text),
+      });
+    }
+
     // Calculate total odds
     let totalOdds = 0;
     if (selections.length > 1) {
       const validSelOdds = selections.filter(s => s.odds > 0);
       totalOdds = validSelOdds.length > 0 ? validSelOdds.reduce((acc, s) => acc * s.odds, 1) : 0;
+    } else if (selections.length === 1 && selections[0].odds > 0) {
+      totalOdds = selections[0].odds;
     } else if (allOdds.length > 0) {
       totalOdds = allOdds[0];
     }
 
-    // Fallback for single odds extraction
+    // Fallback for total odds from labeled patterns
     if (totalOdds === 0) {
       const singleOddsPatterns = [
         /odds[:\s]*(\d+[.,]?\d*)/i,
@@ -271,6 +373,20 @@ class OCRService {
       }
     }
 
+    // Extract potential win
+    let extractedPotentialWin = 0;
+    const potWinPatterns = [
+      /(?:potential\s*win|vincita\s*potenziale|ganancia|gewinn|gain)[:\s]*[$€£]?\s*(\d+[.,]?\d*)/i,
+      /(?:to\s*win|returns?)[:\s]*[$€£]?\s*(\d+[.,]?\d*)/i,
+    ];
+    for (const pattern of potWinPatterns) {
+      const match = text.match(pattern);
+      if (match) {
+        extractedPotentialWin = parseFloat(match[1].replace(',', '.'));
+        break;
+      }
+    }
+
     // Title
     let title = '';
     if (selections.length > 1) {
@@ -278,13 +394,12 @@ class OCRService {
     } else if (selections.length === 1) {
       title = selections[0].event;
     } else if (lines.length > 0) {
-      // Use first meaningful line as title
       title = lines.find(l => l.length > 3 && !/^[\d.,€$£]+$/.test(l)) || lines[0].substring(0, 50);
     }
 
     if (!title) title = 'Scanned Bet';
 
-    const potentialWin = stake * totalOdds;
+    const potentialWin = extractedPotentialWin > 0 ? extractedPotentialWin : stake * totalOdds;
     const betType = selections.length > 1 ? 'parlay' : 'single';
     const inferredLeague = selections.find(selection => selection.league)?.league;
     const inferredMarket = selections[0]?.market || this.inferMarket(text);

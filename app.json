@@ -39,7 +39,10 @@
       }
     },
     "plugins": [
-      "expo-font"
+      "expo-font",
+      "expo-camera",
+      "expo-image-picker",
+      "expo-notifications"
     ]
   }
 }

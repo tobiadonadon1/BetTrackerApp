@@ -18,6 +18,8 @@ import { colors } from '../constants/colors';
 import { useBets, useSubscription } from '../hooks';
 import ocrService from '../services/ocrService';
 
+const IMAGE_QUALITY = 0.85; // High quality needed for OCR text recognition
+
 interface ScanTicketScreenProps {
   navigation: any;
   route: any;
@@ -31,6 +33,7 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   const [scanning, setScanning] = useState(false);
   const [flashAnim] = useState(new Animated.Value(0));
   const cameraRef = useRef<CameraView>(null);
+  const processingRef = useRef(false); // Guard against double-processing
   const { createBet } = useBets();
   const { canUseFeature, openPaywall } = useSubscription();
 
@@ -53,7 +56,7 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   }, [mode]);
 
   useEffect(() => {
-    if (!capturedImage || scanning) return;
+    if (!capturedImage || scanning || processingRef.current) return;
     processImage();
   }, [capturedImage]);
 
@@ -61,9 +64,11 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
     try {
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true,
-        aspect: [4, 3],
-        quality: 0.6, // Compressed for fast upload to Google Vision API
+        // CRITICAL: Do NOT enable allowsEditing — it forces a crop/zoom
+        // editor on iOS which cuts off most of the bet ticket (parlays
+        // are tall receipts that need to be captured in full).
+        allowsEditing: false,
+        quality: IMAGE_QUALITY,
       });
 
       if (!result.canceled && result.assets[0]) {
@@ -86,7 +91,7 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
           Animated.timing(flashAnim, { toValue: 0, duration: 150, useNativeDriver: Platform.OS !== 'web' }),
         ]).start();
 
-        const photo = await cameraRef.current.takePictureAsync({ quality: 0.6 });
+        const photo = await cameraRef.current.takePictureAsync({ quality: IMAGE_QUALITY });
         if (photo) {
           setCapturedImage(photo.uri);
         }
@@ -97,32 +102,45 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   };
 
   const processImage = async () => {
-    if (!capturedImage) return;
+    if (!capturedImage || processingRef.current) return;
+    processingRef.current = true;
 
     setScanning(true);
 
     try {
       const extracted = await ocrService.extractBetData(capturedImage);
 
+      // Determine if we have multiple selections (parlay) or single bet
       const hasMultipleSelections = extracted.selections && extracted.selections.length > 1;
       const betType = hasMultipleSelections ? (extracted.betType || 'parlay') : 'single';
-      const selections = (hasMultipleSelections ? extracted.selections : [{
-        event: extracted.title,
-        selection: extracted.title,
-        odds: extracted.odds,
-        category: extracted.selections[0]?.category || 'Other',
-        market: extracted.market,
-        league: extracted.league,
-        kickoff: undefined,
-      }]).map((selection, index) => ({
+
+      // Build selections array — handle both multi-leg and single-bet cases safely
+      let rawSelections;
+      if (hasMultipleSelections) {
+        rawSelections = extracted.selections;
+      } else {
+        // Single bet: use first selection if available, otherwise build from extracted title/odds
+        const firstSel = extracted.selections?.[0];
+        rawSelections = [{
+          event: firstSel?.event || extracted.title || 'Scanned Bet',
+          selection: firstSel?.selection || extracted.title || 'Scanned Bet',
+          odds: firstSel?.odds || extracted.odds || 0,
+          category: firstSel?.category || 'Other',
+          market: firstSel?.market || extracted.market || 'other',
+          league: firstSel?.league || extracted.league,
+          kickoff: firstSel?.kickoff || undefined,
+        }];
+      }
+
+      const selections = rawSelections.map((selection, index) => ({
         id: `${Date.now()}-${index}`,
-        event: selection.event,
-        selection: selection.selection,
-        odds: selection.odds,
+        event: selection.event || 'Unknown Event',
+        selection: selection.selection || selection.event || 'Unknown',
+        odds: selection.odds || 0,
         oddsFormat: 'decimal' as const,
         status: 'pending' as const,
-        category: selection.category,
-        market: selection.market,
+        category: selection.category || 'Other',
+        market: selection.market || 'other',
         kickoff: selection.kickoff || null,
       }));
 
@@ -130,26 +148,38 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
         .map(selection => selection.event.split(' — ')[0])
         .find(Boolean);
 
+      // Calculate totalOdds — use extracted if available, otherwise derive from selections
+      const totalOdds = extracted.odds > 0
+        ? extracted.odds
+        : selections.reduce((acc, sel) => acc * (sel.odds > 0 ? sel.odds : 1), 1);
+
+      const stakeVal = extracted.stake || 0;
+      const potentialWin = extracted.potentialWin > 0
+        ? extracted.potentialWin
+        : Number((stakeVal * totalOdds).toFixed(2));
+
       const createdBet = await createBet({
-        title: hasMultipleSelections ? `Parlay (${selections.length} legs)` : extracted.title,
-        bookmaker: extracted.bookmaker,
-        stake: extracted.stake,
-        totalOdds: extracted.odds,
+        title: hasMultipleSelections ? `Parlay (${selections.length} legs)` : (extracted.title || 'Scanned Bet'),
+        bookmaker: extracted.bookmaker || 'Unknown',
+        stake: stakeVal,
+        totalOdds: Number(totalOdds.toFixed(2)),
         oddsFormat: 'decimal',
-        potentialWin: extracted.potentialWin,
+        potentialWin,
         status: 'pending',
         date: new Date().toISOString(),
         selections,
         category: selections[0]?.category || 'Other',
         betType,
-        market: extracted.market,
+        market: extracted.market || 'other',
         league: commonLeague || undefined,
         source: mode === 'gallery' ? 'scan-gallery' : 'scan-camera',
       });
 
       navigation.replace('BetDetail', { betId: createdBet.id, selectionIndex: 0 });
     } catch (error: any) {
+      console.error('[ScanTicket] processImage error:', error);
       setScanning(false);
+      processingRef.current = false;
       const msg = error.message || '';
       const isNetwork = msg.toLowerCase().includes('fetch') || msg.toLowerCase().includes('network');
       Alert.alert(
@@ -168,6 +198,7 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   const retake = () => {
     setCapturedImage(null);
     setScanning(false);
+    processingRef.current = false;
     if (mode === 'gallery') {
       pickImage();
     }
