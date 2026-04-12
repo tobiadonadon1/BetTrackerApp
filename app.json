@@ -40,9 +40,25 @@
     },
     "plugins": [
       "expo-font",
-      "expo-camera",
-      "expo-image-picker",
-      "expo-notifications"
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "BETRA needs camera access to scan your bet tickets for automatic data extraction."
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "BETRA needs photo library access to scan bet tickets from your saved photos."
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#0B1B3D"
+        }
+      ]
     ]
   }
 }
