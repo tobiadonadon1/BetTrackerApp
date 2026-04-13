@@ -90,11 +90,14 @@ class OCRService {
    * Throws a clear error if the key is missing or extraction fails.
    */
   async extractBetData(imageUri: string): Promise<OCRExtractionResult> {
+    console.log('[OCR] extractBetData called. Vision API key present:', !!GOOGLE_VISION_API_KEY, 'Key length:', GOOGLE_VISION_API_KEY?.length || 0);
+
     const base64Image = await this.imageToBase64(imageUri);
 
     // Ensure Google Vision API key is configured
     if (!GOOGLE_VISION_API_KEY) {
-      throw new Error('Google Vision API key is not configured. Please add EXPO_PUBLIC_GOOGLE_VISION_API_KEY to your .env file.');
+      console.error('[OCR] GOOGLE_VISION_API_KEY is falsy. process.env value:', typeof process.env.EXPO_PUBLIC_GOOGLE_VISION_API_KEY);
+      throw new Error('OCR is not configured. The Google Vision API key is missing from this build. Please rebuild the app.');
     }
 
     // Call Google Vision — let errors propagate with real messages

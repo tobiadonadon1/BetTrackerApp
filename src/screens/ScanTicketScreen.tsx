@@ -39,28 +39,45 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   const { createBet } = useBets();
   const { canUseFeature, openPaywall, loading: subLoading } = useSubscription();
 
+  // Timeout: if subscription context takes too long, force-resolve loading
+  // so we don't block VIP / pro users who already have access
+  const [subTimedOut, setSubTimedOut] = useState(false);
+  useEffect(() => {
+    if (!subLoading) return;
+    const timer = setTimeout(() => {
+      console.warn('[ScanTicket] Subscription loading timed out after 5s — continuing anyway');
+      setSubTimedOut(true);
+    }, SUBSCRIPTION_LOADING_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [subLoading]);
+
+  // Treat subscription as resolved if it finished OR timed out
+  const subReady = !subLoading || subTimedOut;
+
   // Note: OCR access is already gated in AddChoiceModal and AddBetScreen.
   // If user somehow gets here without OCR, show paywall and go back gracefully.
   // IMPORTANT: We MUST wait for the subscription context to finish loading before
   // checking canUseFeature, otherwise VIP/pro users get bounced because the tier
   // defaults to 'free' while RevenueCat is initializing.
   useEffect(() => {
-    if (subLoading) return; // Wait until subscription is resolved
+    if (!subReady) return; // Wait until subscription is resolved (or timed out)
     if (!canUseFeature('ocrEnabled')) {
       openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
       const timer = setTimeout(() => navigation.goBack(), 300);
       return () => clearTimeout(timer);
     }
-  }, [subLoading]);
+  }, [subReady]);
 
   // Auto-launch gallery if in gallery mode (only if OCR is available)
   // Must also wait for subscription loading to resolve before checking
+  const galleryLaunched = useRef(false);
   useEffect(() => {
-    if (subLoading) return;
-    if (mode === 'gallery' && !capturedImage && canUseFeature('ocrEnabled')) {
+    if (!subReady) return;
+    if (mode === 'gallery' && !capturedImage && !galleryLaunched.current && canUseFeature('ocrEnabled')) {
+      galleryLaunched.current = true;
       pickImage();
     }
-  }, [mode, subLoading]);
+  }, [mode, subReady]);
 
   useEffect(() => {
     if (!capturedImage || scanning || processingRef.current) return;
