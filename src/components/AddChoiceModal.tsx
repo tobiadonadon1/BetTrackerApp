@@ -24,7 +24,11 @@ interface AddChoiceModalProps {
 
 export default function AddChoiceModal({ visible, onClose, onScan, onManual, onGallery }: AddChoiceModalProps) {
   const slideAnim = useRef(new Animated.Value(300)).current;
-  const { canUseFeature, openPaywall } = useSubscription();
+  const { canUseFeature, openPaywall, loading: subLoading } = useSubscription();
+
+  // While subscription is loading, assume OCR is available to avoid
+  // blocking VIP/pro users whose tier hasn't resolved yet.
+  const ocrAvailable = subLoading || canUseFeature('ocrEnabled');
 
   React.useEffect(() => {
     if (visible) {
@@ -55,30 +59,30 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
           <Text style={styles.title}>Add New Bet</Text>
           <Text style={styles.subtitle}>Choose how you want to add your bet</Text>
 
-          <TouchableOpacity style={[styles.option, styles.scanOption, !canUseFeature('ocrEnabled') && styles.optionDisabled]} onPress={() => {
-            if (!canUseFeature('ocrEnabled')) {
+          <TouchableOpacity style={[styles.option, styles.scanOption, !ocrAvailable && styles.optionDisabled]} onPress={() => {
+            if (!ocrAvailable) {
               onClose();
               openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
               return;
             }
             onClose(); onScan();
           }}>
-            <View style={[styles.iconContainer, { backgroundColor: canUseFeature('ocrEnabled') ? colors.accent : colors.surface }]}>
-              <Ionicons name="camera" size={28} color={canUseFeature('ocrEnabled') ? colors.primary : colors.textMuted} />
+            <View style={[styles.iconContainer, { backgroundColor: ocrAvailable ? colors.accent : colors.surface }]}>
+              <Ionicons name="camera" size={28} color={ocrAvailable ? colors.primary : colors.textMuted} />
             </View>
             <View style={styles.optionText}>
               <Text style={styles.optionTitle}>Scan Ticket</Text>
-              <Text style={styles.optionDesc}>{canUseFeature('ocrEnabled') ? 'Take a photo of your bet ticket' : 'Pro feature — Tap to upgrade'}</Text>
+              <Text style={styles.optionDesc}>{ocrAvailable ? 'Take a photo of your bet ticket' : 'Pro feature — Tap to upgrade'}</Text>
             </View>
-            {!canUseFeature('ocrEnabled') ? (
+            {!ocrAvailable ? (
               <Ionicons name="lock-closed" size={18} color="#FBBF24" />
             ) : (
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
             )}
           </TouchableOpacity>
 
-          <TouchableOpacity style={[styles.option, !canUseFeature('ocrEnabled') && styles.optionDisabled]} onPress={() => {
-            if (!canUseFeature('ocrEnabled')) {
+          <TouchableOpacity style={[styles.option, !ocrAvailable && styles.optionDisabled]} onPress={() => {
+            if (!ocrAvailable) {
               onClose();
               openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
               return;
@@ -86,13 +90,13 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
             onClose(); onGallery();
           }}>
             <View style={[styles.iconContainer, { backgroundColor: colors.surface }]}>
-              <Ionicons name="images" size={28} color={canUseFeature('ocrEnabled') ? colors.accent : colors.textMuted} />
+              <Ionicons name="images" size={28} color={ocrAvailable ? colors.accent : colors.textMuted} />
             </View>
             <View style={styles.optionText}>
               <Text style={styles.optionTitle}>Upload from Gallery</Text>
-              <Text style={styles.optionDesc}>{canUseFeature('ocrEnabled') ? 'Select existing photo' : 'Pro feature — Tap to upgrade'}</Text>
+              <Text style={styles.optionDesc}>{ocrAvailable ? 'Select existing photo' : 'Pro feature — Tap to upgrade'}</Text>
             </View>
-            {!canUseFeature('ocrEnabled') ? (
+            {!ocrAvailable ? (
               <Ionicons name="lock-closed" size={18} color="#FBBF24" />
             ) : (
               <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />

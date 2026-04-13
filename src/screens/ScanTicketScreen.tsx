@@ -16,6 +16,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
 import { useBets, useSubscription } from '../hooks';
+
+const SUBSCRIPTION_LOADING_TIMEOUT_MS = 5000;
 import ocrService from '../services/ocrService';
 
 const IMAGE_QUALITY = 0.85; // High quality needed for OCR text recognition
@@ -35,25 +37,30 @@ export default function ScanTicketScreen({ navigation, route }: ScanTicketScreen
   const cameraRef = useRef<CameraView>(null);
   const processingRef = useRef(false); // Guard against double-processing
   const { createBet } = useBets();
-  const { canUseFeature, openPaywall } = useSubscription();
+  const { canUseFeature, openPaywall, loading: subLoading } = useSubscription();
 
   // Note: OCR access is already gated in AddChoiceModal and AddBetScreen.
   // If user somehow gets here without OCR, show paywall and go back gracefully.
+  // IMPORTANT: We MUST wait for the subscription context to finish loading before
+  // checking canUseFeature, otherwise VIP/pro users get bounced because the tier
+  // defaults to 'free' while RevenueCat is initializing.
   useEffect(() => {
+    if (subLoading) return; // Wait until subscription is resolved
     if (!canUseFeature('ocrEnabled')) {
       openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
-      // Delay goBack to avoid state conflicts with the paywall opening
       const timer = setTimeout(() => navigation.goBack(), 300);
       return () => clearTimeout(timer);
     }
-  }, []);
+  }, [subLoading]);
 
   // Auto-launch gallery if in gallery mode (only if OCR is available)
+  // Must also wait for subscription loading to resolve before checking
   useEffect(() => {
+    if (subLoading) return;
     if (mode === 'gallery' && !capturedImage && canUseFeature('ocrEnabled')) {
       pickImage();
     }
-  }, [mode]);
+  }, [mode, subLoading]);
 
   useEffect(() => {
     if (!capturedImage || scanning || processingRef.current) return;

@@ -57,7 +57,13 @@ const VIP_EMAILS = [
 export const SubscriptionProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
   const isGuest = !user || user.id === 'guest';
-  const isVIP = !!(user?.email && VIP_EMAILS.includes(user.email.toLowerCase()));
+  const userEmail = user?.email?.trim().toLowerCase() || '';
+  const isVIP = VIP_EMAILS.some(vip => vip.toLowerCase() === userEmail);
+
+  // Debug: helps trace why OCR might be blocked
+  if (__DEV__ && user && !isGuest) {
+    console.log(`[Subscription] User email: "${user.email}", isVIP: ${isVIP}`);
+  }
 
   const [rcInfo, setRcInfo] = useState<RevenueCatSubscriptionInfo>({
     tier: 'free',

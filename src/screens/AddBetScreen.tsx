@@ -39,7 +39,9 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
   const insets = useSafeAreaInsets();
   const { t } = useTranslation();
   const { createBet, updateBet, bets } = useBets();
-  const { canUseFeature, isOverLimit, ticketCount, limits, openPaywall, tier } = useSubscription();
+  const { canUseFeature, isOverLimit, ticketCount, limits, openPaywall, tier, loading: subLoading } = useSubscription();
+  // While subscription is loading, assume OCR is available to avoid blocking VIP/pro
+  const ocrAvailable = subLoading || canUseFeature('ocrEnabled');
   const editingBet = route.params?.bet;
 
   const [betType, setBetType] = useState<BetType>(editingBet?.betType || 'single');
@@ -262,9 +264,9 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         {!editingBet && (
           <View style={styles.scanActionsRow}>
             <TouchableOpacity
-              style={[styles.scanTicketButton, styles.scanTicketButtonHalf, !canUseFeature('ocrEnabled') && styles.disabledButton]}
+              style={[styles.scanTicketButton, styles.scanTicketButtonHalf, !ocrAvailable && styles.disabledButton]}
               onPress={() => {
-                if (!canUseFeature('ocrEnabled')) {
+                if (!ocrAvailable) {
                   openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
                   return;
                 }
@@ -272,13 +274,13 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
               }}
               accessibilityRole="button"
             >
-              <Ionicons name="camera" size={20} color={!canUseFeature('ocrEnabled') ? colors.textMuted : colors.primary} />
-              <Text style={[styles.scanTicketText, !canUseFeature('ocrEnabled') && { color: colors.textMuted }]} numberOfLines={1}>{t('scanTicket')}</Text>
+              <Ionicons name="camera" size={20} color={!ocrAvailable ? colors.textMuted : colors.primary} />
+              <Text style={[styles.scanTicketText, !ocrAvailable && { color: colors.textMuted }]} numberOfLines={1}>{t('scanTicket')}</Text>
             </TouchableOpacity>
             <TouchableOpacity
-              style={[styles.uploadTicketButton, styles.scanTicketButtonHalf, !canUseFeature('ocrEnabled') && styles.disabledButton]}
+              style={[styles.uploadTicketButton, styles.scanTicketButtonHalf, !ocrAvailable && styles.disabledButton]}
               onPress={() => {
-                if (!canUseFeature('ocrEnabled')) {
+                if (!ocrAvailable) {
                   openPaywall('OCR Bet Scanning is a Pro feature. Upgrade to scan tickets automatically.');
                   return;
                 }
@@ -286,8 +288,8 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
               }}
               accessibilityRole="button"
             >
-              <Ionicons name="images" size={20} color={!canUseFeature('ocrEnabled') ? colors.textMuted : colors.accent} />
-              <Text style={[styles.uploadTicketText, !canUseFeature('ocrEnabled') && { color: colors.textMuted }]} numberOfLines={1}>{t('uploadGallery')}</Text>
+              <Ionicons name="images" size={20} color={!ocrAvailable ? colors.textMuted : colors.accent} />
+              <Text style={[styles.uploadTicketText, !ocrAvailable && { color: colors.textMuted }]} numberOfLines={1}>{t('uploadGallery')}</Text>
             </TouchableOpacity>
           </View>
         )}
@@ -296,7 +298,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         )}
 
         {/* Subscription inline warnings */}
-        {!editingBet && !canUseFeature('ocrEnabled') && (
+        {!editingBet && !ocrAvailable && (
           <Text style={styles.upgradeWarning}>
             OCR scanning requires Pro. Upgrade to scan tickets →
           </Text>
