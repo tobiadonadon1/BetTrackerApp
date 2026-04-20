@@ -386,7 +386,7 @@ export default function SettingsScreen() {
               />
             </View>
             <View style={styles.settingContent}>
-              <Text style={styles.settingTitle}>Notifiche push</Text>
+              <Text style={styles.settingTitle}>Notifiche</Text>
               <Text style={styles.settingSubtitle}>
                 {notifStatus === 'granted' && 'Attive — riceverai aggiornamenti su gol e fine partita'}
                 {notifStatus === 'undetermined' && 'Tocca per attivare le notifiche sui tuoi eventi live'}
