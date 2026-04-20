@@ -1,5 +1,6 @@
 import * as Notifications from 'expo-notifications';
 import { Platform } from 'react-native';
+import Constants from 'expo-constants';
 import { createNavigationContainerRef } from '@react-navigation/native';
 import { supabase } from '../config/supabase';
 
@@ -10,10 +11,21 @@ class NotificationService {
   /**
    * Initialize notifications
    */
-  async initialize(): Promise<boolean> {
+  async initialize(requestPermissions: boolean = false): Promise<boolean> {
     try {
       if (Platform.OS === 'web' && !WEB_VAPID_PUBLIC_KEY) {
         return false;
+      }
+
+      // On iOS, check and configure notification channel
+      if (Platform.OS === 'android') {
+        await Notifications.setNotificationChannelAsync('default', {
+          name: 'Bet Updates',
+          importance: Notifications.AndroidImportance.HIGH,
+          vibrationPattern: [0, 250, 250, 250],
+          lightColor: '#4A9FD4',
+          sound: 'default',
+        });
       }
 
       // Request permissions
@@ -21,22 +33,27 @@ class NotificationService {
       let finalStatus = existingStatus;
 
       if (existingStatus !== 'granted') {
+        if (!requestPermissions) {
+          console.log('[Notifications] Permissions not granted. Skipping prompt to comply with App Store rules.');
+          return false;
+        }
         const { status } = await Notifications.requestPermissionsAsync();
         finalStatus = status;
       }
 
       if (finalStatus !== 'granted') {
-        console.warn('Notification permissions not granted');
+        console.warn('[Notifications] Permissions not granted. Status:', finalStatus);
         return false;
       }
 
       // Get push token
       const token = await this.getPushToken();
+      console.log('[Notifications] Push token:', token ? token.substring(0, 30) + '...' : 'null');
       if (token) {
         await this.savePushToken(token);
       }
 
-      // Set notification handler
+      // Set notification handler — ensures notifications show even when app is in foreground
       Notifications.setNotificationHandler({
         handleNotification: async () => ({
           shouldShowAlert: true,
@@ -47,25 +64,45 @@ class NotificationService {
         }),
       });
 
+      console.log('[Notifications] Initialized successfully');
       return true;
     } catch (error) {
-      console.error('Failed to initialize notifications:', error);
+      console.error('[Notifications] Failed to initialize:', error);
       return false;
     }
   }
 
   /**
-   * Get Expo push token
+   * Get Expo push token — requires projectId for iOS native builds
    */
   async getPushToken(): Promise<string | null> {
     try {
-      const options = Platform.OS === 'web' && WEB_VAPID_PUBLIC_KEY
-        ? { vapidPublicKey: WEB_VAPID_PUBLIC_KEY }
-        : undefined;
-      const { data } = await Notifications.getExpoPushTokenAsync(options as any);
+      const projectId = Constants.expoConfig?.extra?.eas?.projectId;
+
+      if (Platform.OS === 'web') {
+        if (!WEB_VAPID_PUBLIC_KEY) return null;
+        const { data } = await Notifications.getExpoPushTokenAsync({
+          vapidPublicKey: WEB_VAPID_PUBLIC_KEY,
+        } as any);
+        return data;
+      }
+
+      // Native: projectId is REQUIRED for iOS push notifications
+      if (!projectId) {
+        console.error('[Notifications] Missing projectId in app.json extra.eas.projectId — push tokens will NOT work on iOS');
+        // Try anyway (might work in Expo Go)
+        try {
+          const { data } = await Notifications.getExpoPushTokenAsync();
+          return data;
+        } catch {
+          return null;
+        }
+      }
+
+      const { data } = await Notifications.getExpoPushTokenAsync({ projectId });
       return data;
     } catch (error) {
-      console.error('Failed to get push token:', error);
+      console.error('[Notifications] Failed to get push token:', error);
       return null;
     }
   }
@@ -121,6 +158,62 @@ class NotificationService {
   }
 
   /**
+   * Send a GOAL notification — triggered when polling detects a score change
+   */
+  async sendGoalNotification(
+    match: string,
+    homeTeam: string,
+    awayTeam: string,
+    homeScore: number,
+    awayScore: number,
+    betId?: string,
+  ): Promise<void> {
+    const dedupKey = `goal_${match}_${homeScore}_${awayScore}`;
+    if (this.recentNotifications.has(dedupKey)) return;
+    this.recentNotifications.set(dedupKey, Date.now());
+
+    const title = `⚽ GOL! ${homeTeam} ${homeScore} - ${awayScore} ${awayTeam}`;
+    const body = `Punteggio aggiornato per la tua scommessa`;
+
+    await this.scheduleLocalNotification(title, body, {
+      type: 'goal',
+      match,
+      homeScore,
+      awayScore,
+      bet_id: betId,
+    });
+  }
+
+  /**
+   * Send match-ended notification — triggered when a match finishes
+   */
+  async sendMatchEndNotification(
+    match: string,
+    homeScore: number,
+    awayScore: number,
+    betOutcome: 'won' | 'lost' | 'pending',
+    betId?: string,
+  ): Promise<void> {
+    const dedupKey = `match_end_${match}_${homeScore}_${awayScore}`;
+    if (this.recentNotifications.has(dedupKey)) return;
+    this.recentNotifications.set(dedupKey, Date.now());
+
+    const emoji = betOutcome === 'won' ? '🎉' : betOutcome === 'lost' ? '😞' : '🏁';
+    const title = `${emoji} Partita Finita: ${match}`;
+    const outcomeLabel = betOutcome === 'won' ? 'VINTA' : betOutcome === 'lost' ? 'PERSA' : 'In attesa';
+    const body = `Risultato finale: ${homeScore}-${awayScore} — Scommessa: ${outcomeLabel}`;
+
+    await this.scheduleLocalNotification(title, body, {
+      type: 'match_end',
+      match,
+      homeScore,
+      awayScore,
+      betOutcome,
+      bet_id: betId,
+    });
+  }
+
+  /**
    * Template for sending in-play event notifications (Goals, Assists, etc.)
    * This would typically be triggered by your backend receiving a webhook from a sports data provider.
    */
@@ -157,6 +250,22 @@ class NotificationService {
   async clearAllNotifications(): Promise<void> {
     await Notifications.dismissAllNotificationsAsync();
     await Notifications.cancelAllScheduledNotificationsAsync();
+  }
+
+  // ── Dedup guard ──
+  private recentNotifications = new Map<string, number>();
+
+  /** Clean stale dedup entries (called periodically) */
+  private cleanDedup() {
+    const fiveMinAgo = Date.now() - 300_000;
+    for (const [key, ts] of this.recentNotifications) {
+      if (ts < fiveMinAgo) this.recentNotifications.delete(key);
+    }
+  }
+
+  /** Periodically clean dedup map */
+  constructor() {
+    setInterval(() => this.cleanDedup(), 60_000);
   }
 }
 

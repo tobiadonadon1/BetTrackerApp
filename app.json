@@ -8,18 +8,19 @@
     "userInterfaceStyle": "dark",
     "backgroundColor": "#0B1B3D",
     "splash": {
-      "image": "./assets/new_logo.png",
+      "image": "./assets/splash_padded.png",
       "resizeMode": "contain",
       "backgroundColor": "#0B1B3D"
     },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tobiadonadon.betra",
-      "buildNumber": "12",
+      "buildNumber": "17",
       "infoPlist": {
         "NSCameraUsageDescription": "BETRA needs camera access to scan your bet tickets for automatic data extraction.",
         "NSPhotoLibraryUsageDescription": "BETRA needs photo library access to scan bet tickets from your saved photos.",
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "UIBackgroundModes": ["remote-notification"]
       }
     },
     "android": {

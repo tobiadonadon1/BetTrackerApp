@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import {
   View,
   Text,
@@ -11,7 +11,9 @@ import {
   Linking,
   Platform,
   TextInput,
+  AppState,
 } from 'react-native';
+import * as Notifications from 'expo-notifications';
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../constants/colors';
 import { useAuth, useBankroll, useSubscription } from '../hooks';
@@ -21,6 +23,7 @@ import AppBackground from '../components/AppBackground';
 import PageHeader from '../components/PageHeader';
 import authService from '../services/authService';
 import betService from '../services/betService';
+import notificationService from '../services/notificationService';
 
 export default function SettingsScreen() {
   const { user, signOut, isGuest } = useAuth();
@@ -32,6 +35,61 @@ export default function SettingsScreen() {
   const [bankrollInput, setBankrollInput] = useState('');
   const [bankrollSaving, setBankrollSaving] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [notifStatus, setNotifStatus] = useState<'granted' | 'denied' | 'undetermined' | 'unsupported' | 'loading'>('loading');
+
+  const refreshNotifStatus = useCallback(async () => {
+    if (Platform.OS === 'web') { setNotifStatus('unsupported'); return; }
+    try {
+      const { status } = await Notifications.getPermissionsAsync();
+      if (status === 'granted') setNotifStatus('granted');
+      else if (status === 'denied') setNotifStatus('denied');
+      else setNotifStatus('undetermined');
+    } catch {
+      setNotifStatus('unsupported');
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshNotifStatus();
+    const sub = AppState.addEventListener('change', (next) => {
+      if (next === 'active') refreshNotifStatus();
+    });
+    return () => sub.remove();
+  }, [refreshNotifStatus]);
+
+  const handleNotificationsPress = useCallback(async () => {
+    if (Platform.OS === 'web') return;
+    const { status } = await Notifications.getPermissionsAsync();
+    if (status === 'granted') {
+      await notificationService.initialize(false);
+      Alert.alert('Notifiche attive', 'Riceverai aggiornamenti in tempo reale su gol e fine partita.');
+      refreshNotifStatus();
+      return;
+    }
+    if (status === 'undetermined') {
+      const ok = await notificationService.initialize(true);
+      await refreshNotifStatus();
+      if (!ok) {
+        Alert.alert(
+          'Notifiche non attivate',
+          "iOS non ha mostrato il prompt oppure hai rifiutato. Apri Impostazioni > BETRA > Notifiche per abilitarle manualmente.",
+          [
+            { text: 'Annulla', style: 'cancel' },
+            { text: 'Apri Impostazioni', onPress: () => Linking.openSettings() },
+          ],
+        );
+      }
+      return;
+    }
+    Alert.alert(
+      'Notifiche bloccate',
+      "iOS ha memorizzato il tuo rifiuto precedente e non può mostrare di nuovo il prompt. Per attivarle, apri Impostazioni > BETRA > Notifiche e abilita 'Consenti notifiche'.",
+      [
+        { text: 'Annulla', style: 'cancel' },
+        { text: 'Apri Impostazioni', onPress: () => Linking.openSettings() },
+      ],
+    );
+  }, [refreshNotifStatus]);
 
   const handleLanguageChange = (lang: Language) => {
     setLanguage(lang);
@@ -157,7 +215,13 @@ export default function SettingsScreen() {
   const openBankrollModal = () => {
     setBankrollInput(bankrollSettings?.initialBankroll?.toString() || '');
     setBankrollModalVisible(true);
+    // Delay focus to let the modal finish animating, preventing iOS freeze
+    setTimeout(() => {
+      bankrollInputRef.current?.focus();
+    }, 600);
   };
+
+  const bankrollInputRef = useRef<TextInput>(null);
 
   const SettingItem = ({ icon, title, subtitle, value, onPress, disabled }: any) => (
     <TouchableOpacity
@@ -311,6 +375,36 @@ export default function SettingsScreen() {
           )}
         </View>
 
+        <SectionTitle title="Notifiche" />
+        <View style={styles.section}>
+          <TouchableOpacity style={styles.settingItem} onPress={handleNotificationsPress} disabled={notifStatus === 'loading' || notifStatus === 'unsupported'}>
+            <View style={[styles.settingIcon, notifStatus === 'granted' && { backgroundColor: '#4ADE8022' }]}>
+              <Ionicons
+                name={notifStatus === 'granted' ? 'notifications' : 'notifications-off-outline'}
+                size={22}
+                color={notifStatus === 'granted' ? '#4ADE80' : colors.accent}
+              />
+            </View>
+            <View style={styles.settingContent}>
+              <Text style={styles.settingTitle}>Notifiche push</Text>
+              <Text style={styles.settingSubtitle}>
+                {notifStatus === 'granted' && 'Attive — riceverai aggiornamenti su gol e fine partita'}
+                {notifStatus === 'undetermined' && 'Tocca per attivare le notifiche sui tuoi eventi live'}
+                {notifStatus === 'denied' && 'Disattivate — tocca per aprire Impostazioni iOS'}
+                {notifStatus === 'unsupported' && 'Non supportate su questa piattaforma'}
+                {notifStatus === 'loading' && 'Verifica stato…'}
+              </Text>
+            </View>
+            {notifStatus === 'granted' ? (
+              <Ionicons name="checkmark-circle" size={22} color="#4ADE80" />
+            ) : notifStatus === 'loading' ? (
+              <ActivityIndicator color={colors.accent} />
+            ) : notifStatus !== 'unsupported' ? (
+              <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
+            ) : null}
+          </TouchableOpacity>
+        </View>
+
         <SectionTitle title={t('settings') || "Preferences"} />
         <View style={styles.section}>
           <TouchableOpacity style={styles.settingItem} onPress={() => setLangModalVisible(true)}>
@@ -360,12 +454,36 @@ export default function SettingsScreen() {
           <SettingItem
             icon="document-text-outline"
             title="Terms of Service"
-            onPress={() => Linking.openURL('https://encdegylezyqbitongjk.supabase.co/storage/v1/object/public/legal/terms.html')}
+            onPress={async () => {
+              const url = 'https://encdegylezyqbitongjk.supabase.co/storage/v1/object/public/legal/terms.html';
+              try {
+                const res = await fetch(url, { method: 'HEAD' });
+                if (res.ok) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Unavailable', 'Terms of Service are being set up. Please try again later.');
+                }
+              } catch (e) {
+                Alert.alert('Unavailable', 'Could not load Terms of Service. Check your internet connection.');
+              }
+            }}
           />
           <SettingItem
             icon="shield-checkmark-outline"
             title="Privacy Policy"
-            onPress={() => Linking.openURL('https://encdegylezyqbitongjk.supabase.co/storage/v1/object/public/legal/privacy.html')}
+            onPress={async () => {
+              const url = 'https://encdegylezyqbitongjk.supabase.co/storage/v1/object/public/legal/privacy.html';
+              try {
+                const res = await fetch(url, { method: 'HEAD' });
+                if (res.ok) {
+                  await Linking.openURL(url);
+                } else {
+                  Alert.alert('Unavailable', 'Privacy Policy is being set up. Please try again later.');
+                }
+              } catch (e) {
+                Alert.alert('Unavailable', 'Could not load Privacy Policy. Check your internet connection.');
+              }
+            }}
           />
         </View>
 
@@ -443,13 +561,13 @@ export default function SettingsScreen() {
 
             <Text style={styles.bankrollModalLabel}>Initial Bankroll Amount ($)</Text>
             <TextInput
+              ref={bankrollInputRef}
               style={styles.bankrollModalInput}
               value={bankrollInput}
               onChangeText={setBankrollInput}
               placeholder="e.g. 1000"
               placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
-              autoFocus
             />
             <Text style={styles.bankrollModalHint}>
               This is your starting balance. We recommend betting 1-2% per bet.

@@ -34,7 +34,10 @@ export function useNotifications() {
       return;
     }
 
-    notificationService.initialize();
+    // Request iOS/Android permission prompt on first login. Without this, the
+    // service short-circuits at existingStatus !== 'granted' and iOS silently
+    // drops every scheduleNotificationAsync call.
+    notificationService.initialize(true);
 
     const responseListener = notificationService.addNotificationResponseListener((response) => {
       const data = response.notification.request.content.data;
