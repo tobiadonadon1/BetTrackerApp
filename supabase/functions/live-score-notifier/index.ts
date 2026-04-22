@@ -25,7 +25,14 @@ const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!;
 const SUPABASE_SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!;
 const API_FOOTBALL_KEY = Deno.env.get('API_FOOTBALL_KEY') || 'ec2c3bd7c9e43099790986337b5dac11';
 const EXPO_PUSH_URL = 'https://exp.host/--/api/v2/push/send';
+const EXPO_RECEIPTS_URL = 'https://exp.host/--/api/v2/push/getReceipts';
 const EXPO_BATCH_SIZE = 100;
+// Expo receipts become available ~15 min after send. We poll tickets aged
+// between 3 min and 24 h; older rows are stamped receipt_checked_at so the
+// partial index stays small.
+const RECEIPT_POLL_MIN_AGE_MS = 3 * 60 * 1000;
+const RECEIPT_POLL_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+const RECEIPT_POLL_BATCH = 1000;
 const FINISHED_STATUSES = new Set(['FT', 'AET', 'PEN', 'AWD', 'WO']);
 
 const supabase: SupabaseClient = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY);
@@ -282,6 +289,114 @@ async function clearInvalidTokens(tokens: string[]): Promise<void> {
   else console.log(`[live-score-notifier] Cleared ${tokens.length} invalid push token(s)`);
 }
 
+// ─── Expo receipt polling ───────────────────────────────────────────
+//
+// Poll Expo for receipts of tickets we sent on previous cron runs. Updates
+// bet_notification_log with the terminal status (ok / error + details) and
+// invalidates push tokens for DeviceNotRegistered. Runs at the top of every
+// cron tick so slow-to-arrive receipts still get observed.
+
+interface ReceiptResult {
+  status: 'ok' | 'error';
+  message?: string;
+  details?: { error?: string };
+}
+
+async function pollReceipts(): Promise<{ checked: number; failed: number; tokensInvalidated: number }> {
+  const now = Date.now();
+  const minOldest = new Date(now - RECEIPT_POLL_MAX_AGE_MS).toISOString();
+  const maxNewest = new Date(now - RECEIPT_POLL_MIN_AGE_MS).toISOString();
+
+  const { data: rows, error } = await supabase
+    .from('bet_notification_log')
+    .select('id, ticket_id, user_id')
+    .is('receipt_checked_at', null)
+    .not('ticket_id', 'is', null)
+    .gte('notified_at', minOldest)
+    .lte('notified_at', maxNewest)
+    .order('notified_at', { ascending: true })
+    .limit(RECEIPT_POLL_BATCH);
+
+  if (error) {
+    console.error('[live-score-notifier] receipt scan failed:', error.message);
+    return { checked: 0, failed: 0, tokensInvalidated: 0 };
+  }
+  if (!rows || rows.length === 0) return { checked: 0, failed: 0, tokensInvalidated: 0 };
+
+  type LogRow = { id: number; ticket_id: string; user_id: string };
+  const typedRows = rows as LogRow[];
+
+  // Hydrate push tokens for DeviceNotRegistered invalidation.
+  const userIds = [...new Set(typedRows.map((r) => r.user_id))];
+  const { data: profs } = await supabase
+    .from('profiles')
+    .select('id, push_token')
+    .in('id', userIds);
+  const tokenByUser = new Map<string, string>();
+  for (const p of profs || []) if (p.push_token) tokenByUser.set(p.id, p.push_token);
+
+  let checked = 0;
+  let failed = 0;
+  const deadTokens = new Set<string>();
+
+  for (let i = 0; i < typedRows.length; i += 100) {
+    const chunk = typedRows.slice(i, i + 100);
+    const ids = chunk.map((r) => r.ticket_id);
+    let receipts: Record<string, ReceiptResult> = {};
+    try {
+      const res = await fetch(EXPO_RECEIPTS_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+        body: JSON.stringify({ ids }),
+      });
+      if (!res.ok) {
+        console.error('[live-score-notifier] getReceipts failed', res.status);
+        continue;
+      }
+      const json = await res.json();
+      receipts = json?.data || {};
+    } catch (e) {
+      console.error('[live-score-notifier] getReceipts threw:', (e as Error).message);
+      continue;
+    }
+
+    const updates: { id: number; status: string; error: string | null }[] = [];
+    for (const row of chunk) {
+      const r = receipts[row.ticket_id];
+      if (!r) continue; // still pending, leave receipt_checked_at null
+      checked++;
+      if (r.status === 'error') {
+        failed++;
+        const errCode = r.details?.error || r.message || 'Unknown';
+        updates.push({ id: row.id, status: 'error', error: errCode });
+        if (errCode === 'DeviceNotRegistered') {
+          const t = tokenByUser.get(row.user_id);
+          if (t) deadTokens.add(t);
+        }
+      } else {
+        updates.push({ id: row.id, status: 'ok', error: null });
+      }
+    }
+
+    // Bulk-update in a single round-trip per batch by issuing parallel updates.
+    await Promise.all(
+      updates.map((u) =>
+        supabase
+          .from('bet_notification_log')
+          .update({
+            receipt_status: u.status,
+            receipt_error: u.error,
+            receipt_checked_at: new Date().toISOString(),
+          })
+          .eq('id', u.id),
+      ),
+    );
+  }
+
+  if (deadTokens.size > 0) await clearInvalidTokens([...deadTokens]);
+  return { checked, failed, tokensInvalidated: deadTokens.size };
+}
+
 // ─── Candidate builder ──────────────────────────────────────────────
 
 function goalTitle(detail: string, home: string, hs: number, as: number, away: string): string {
@@ -310,9 +425,15 @@ function selectionMatchesFixture(sel: BetSelection, fixtureHome: string, fixture
 
 // ─── Main handler ───────────────────────────────────────────────────
 
-Deno.serve(async (_req) => {
+Deno.serve(async (_req: Request) => {
   const startedAt = Date.now();
   try {
+    // ── 0. Poll receipts for previously sent pushes ────────────────
+    //
+    // Runs first so slow-to-arrive receipts get observed even on ticks with
+    // no new live events. The poller catches its own errors internally.
+    const receiptsSummary = await pollReceipts();
+
     // ── 1. Pending bets + push tokens ──────────────────────────────
 
     const { data: bets, error: betsError } = await supabase
@@ -321,10 +442,13 @@ Deno.serve(async (_req) => {
       .eq('status', 'pending');
     if (betsError) throw betsError;
     if (!bets || bets.length === 0) {
-      return new Response(JSON.stringify({ status: 'no_pending_bets' }), { status: 200 });
+      return new Response(
+        JSON.stringify({ status: 'no_pending_bets', receipts: receiptsSummary }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
     }
 
-    const userIds = [...new Set(bets.map((b) => b.user_id))];
+    const userIds = [...new Set(bets.map((b: { user_id: string }) => b.user_id))];
     const { data: profiles, error: profilesError } = await supabase
       .from('profiles')
       .select('id, push_token')
@@ -335,7 +459,10 @@ Deno.serve(async (_req) => {
     const tokenMap = new Map<string, string>();
     for (const p of profiles || []) if (p.push_token) tokenMap.set(p.id, p.push_token);
     if (tokenMap.size === 0) {
-      return new Response(JSON.stringify({ status: 'no_push_tokens', bets: bets.length }), { status: 200 });
+      return new Response(
+        JSON.stringify({ status: 'no_push_tokens', bets: bets.length, receipts: receiptsSummary }),
+        { status: 200, headers: { 'Content-Type': 'application/json' } },
+      );
     }
 
     // ── 2. Live football fixtures ──────────────────────────────────
@@ -688,6 +815,9 @@ Deno.serve(async (_req) => {
     //
     // Insert one row per candidate. Postgres returns only rows that were actually
     // inserted (skipping conflicts). Those are the pushes we actually send.
+    //
+    // If this insert throws (e.g. table missing, RLS misconfig), we MUST throw so
+    // cron sees a red invocation — otherwise we'd silently suppress every push.
 
     const toSend: Candidate[] = [];
     if (candidates.length > 0) {
@@ -704,8 +834,10 @@ Deno.serve(async (_req) => {
         .select('bet_id, event_key');
       if (insertErr) {
         console.error('[live-score-notifier] bet_notification_log insert failed:', insertErr.message);
-      } else if (inserted) {
-        const lookup = new Set(inserted.map((r) => `${r.bet_id}|${r.event_key}`));
+        throw new Error(`bet_notification_log upsert failed: ${insertErr.message}`);
+      }
+      if (inserted) {
+        const lookup = new Set(inserted.map((r: { bet_id: string; event_key: string }) => `${r.bet_id}|${r.event_key}`));
         for (const c of candidates) {
           if (lookup.has(`${c.betId}|${c.eventKey}`)) toSend.push(c);
         }
@@ -892,8 +1024,10 @@ Deno.serve(async (_req) => {
         .select('bet_id, event_key');
       if (insertErr) {
         console.error('[live-score-notifier] settlement log insert failed:', insertErr.message);
-      } else if (inserted) {
-        const lookup = new Set(inserted.map((r) => `${r.bet_id}|${r.event_key}`));
+        throw new Error(`settlement bet_notification_log upsert failed: ${insertErr.message}`);
+      }
+      if (inserted) {
+        const lookup = new Set(inserted.map((r: { bet_id: string; event_key: string }) => `${r.bet_id}|${r.event_key}`));
         for (const c of settlementCandidates) {
           if (lookup.has(`${c.betId}|${c.eventKey}`)) toSend.push(c);
         }
@@ -901,9 +1035,14 @@ Deno.serve(async (_req) => {
     }
 
     // ── 10. Send Expo pushes ───────────────────────────────────────
+    //
+    // For each batch we pair the returned ticket with the candidate (by index)
+    // so we can persist ticket_id back onto bet_notification_log. The receipt
+    // poller in step 0 uses that ticket_id to learn the true APNs outcome.
 
     const invalidTokens = new Set<string>();
     let sent = 0;
+    const ticketUpdates: { betId: string; eventKey: string; ticketId: string }[] = [];
     if (toSend.length > 0) {
       const messages: ExpoMessage[] = toSend.map((c) => ({
         to: c.token,
@@ -916,12 +1055,17 @@ Deno.serve(async (_req) => {
       }));
       for (let i = 0; i < messages.length; i += EXPO_BATCH_SIZE) {
         const batch = messages.slice(i, i + EXPO_BATCH_SIZE);
+        const batchCandidates = toSend.slice(i, i + EXPO_BATCH_SIZE);
         const tickets = await sendExpoBatch(batch);
         for (let j = 0; j < tickets.length; j++) {
           const t = tickets[j];
           const msg = batch[j];
+          const cand = batchCandidates[j];
           if (t?.status === 'ok') {
             sent++;
+            if (t.id && cand) {
+              ticketUpdates.push({ betId: cand.betId, eventKey: cand.eventKey, ticketId: t.id });
+            }
           } else {
             const err = t?.details?.error;
             console.error('[live-score-notifier] push error', err || t?.message, 'for token', msg.to.substring(0, 20) + '…');
@@ -931,6 +1075,21 @@ Deno.serve(async (_req) => {
           }
         }
       }
+    }
+
+    // Stamp ticket_id onto the log rows we just inserted. Parallel single-row
+    // updates keyed by (bet_id, event_key) — the unique constraint guarantees
+    // a single row per key so each update touches exactly one row.
+    if (ticketUpdates.length > 0) {
+      await Promise.all(
+        ticketUpdates.map((u) =>
+          supabase
+            .from('bet_notification_log')
+            .update({ ticket_id: u.ticketId })
+            .eq('bet_id', u.betId)
+            .eq('event_key', u.eventKey),
+        ),
+      );
     }
 
     // ── 11. Persist fixture cache ──────────────────────────────────
@@ -958,7 +1117,8 @@ Deno.serve(async (_req) => {
       parlay_legs_lost: parlayLegLosses.length,
       candidates: candidates.length + settlementCandidates.length,
       pushes_sent: sent,
-      tokens_invalidated: invalidTokens.size,
+      tokens_invalidated: invalidTokens.size + receiptsSummary.tokensInvalidated,
+      receipts: receiptsSummary,
       elapsed_ms: Date.now() - startedAt,
     };
     console.log('[live-score-notifier]', JSON.stringify(body));

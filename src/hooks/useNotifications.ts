@@ -1,6 +1,6 @@
 import { useEffect, useCallback, useRef } from 'react';
 import * as Notifications from 'expo-notifications';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import notificationService from '../services/notificationService';
 import { useAuth } from './useAuth';
 import { navigationRef } from '../services/notificationService';
@@ -50,9 +50,20 @@ export function useNotifications() {
 
     const receivedListener = notificationService.addNotificationReceivedListener(() => {});
 
+    // If the user grants notifications from iOS Settings after first launch,
+    // re-run initialize on foreground so we mint + persist the push token then
+    // rather than waiting for a reinstall. requestPermissions=false keeps this
+    // silent — no duplicate permission prompt.
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        notificationService.initialize(false).catch(() => { /* best effort */ });
+      }
+    });
+
     return () => {
       responseListener.remove();
       receivedListener.remove();
+      appStateSub.remove();
       initializedRef.current = false;
     };
   }, [user]);

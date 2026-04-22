@@ -5,6 +5,7 @@ import { loadMatchResultCache, matchCacheKey } from '../services/matchResultCach
 import { Bet } from '../types';
 import { parseOverUnder, OverUnderInfo, StatType } from '../utils/overUnderParser';
 import footballStatsService, { MatchStats } from '../services/footballStatsService';
+import notificationService from '../services/notificationService';
 
 export interface OverUnderProgress {
   currentValue: number;
@@ -151,7 +152,7 @@ function buildInfo(
 
   if (geminiResult && geminiResult.homeScore >= 0) {
     if (geminiResult.finished) {
-      const outcome = resolvePickFromScore(sel.selectionStr, geminiResult.homeScore, geminiResult.awayScore);
+      const outcome = resolvePickFromScore(sel.selectionStr, geminiResult.homeScore, geminiResult.awayScore, geminiResult.homeTeam, geminiResult.awayTeam);
       const score = `${geminiResult.homeScore}-${geminiResult.awayScore}`;
       if (outcome) {
         const c = outcome === 'won' ? COLORS.won : COLORS.lost;
@@ -184,19 +185,22 @@ function buildInfo(
 
   const eventDate = parseEventDate(sel.commenceTime);
   const betDate = sel.betDate ? new Date(sel.betDate) : null;
-  const refDate = eventDate || betDate;
   const now = new Date();
 
-  if (refDate && !isNaN(refDate.getTime())) {
-    if (refDate > now) {
+  // Only use eventDate for scheduling if it's a REAL commence time from the event itself
+  // NOT the bet insertion date — that would cause "MIN 1" immediately after placing a bet
+  if (eventDate && !isNaN(eventDate.getTime())) {
+    if (eventDate > now) {
       return {
-        matchResult: null, geminiResult: null, smartLabel: formatScheduledTime(refDate), ...COLORS.scheduled,
+        matchResult: null, geminiResult: null, smartLabel: formatScheduledTime(eventDate), ...COLORS.scheduled,
         textColor: COLORS.scheduled.text, resolvedOutcome: null, score: null, overUnderProgress: null,
       };
     }
-    const hoursAgo = (now.getTime() - refDate.getTime()) / 3600000;
+    // Only show MIN X with a REAL commence time (not betDate), and only if
+    // the match is plausibly still in progress (< 2.5 hours since kickoff)
+    const hoursAgo = (now.getTime() - eventDate.getTime()) / 3600000;
     if (hoursAgo < 2.5) {
-      const minute = estimateLiveMinute(refDate);
+      const minute = estimateLiveMinute(eventDate);
       return {
         matchResult: null, geminiResult: null, smartLabel: `MIN ${Math.min(minute, 90)}`, ...COLORS.live,
         textColor: COLORS.live.text, resolvedOutcome: null, score: null, overUnderProgress: null,
@@ -204,6 +208,7 @@ function buildInfo(
     }
   }
 
+  // If betDate is in the FUTURE, show it as a scheduled event
   if (betDate && !isNaN(betDate.getTime()) && betDate > now) {
     return {
       matchResult: null, geminiResult: null, smartLabel: formatScheduledTime(betDate), ...COLORS.scheduled,
@@ -211,6 +216,7 @@ function buildInfo(
     };
   }
 
+  // No real data available — show pending indicator (NOT "MIN X" from bet date!)
   return {
     matchResult: null, geminiResult: null, smartLabel: '…', ...COLORS.scheduled, textColor: COLORS.scheduled.text,
     resolvedOutcome: null, score: null, overUnderProgress: null,
@@ -271,6 +277,8 @@ export function useMatchResults(bets: Bet[]) {
   const [resultMap, setResultMap] = useState<Map<string, FlatMatchInfo>>(new Map());
   const [loading, setLoading] = useState(false);
   const selectionRef = useRef<SelectionData[]>([]);
+  // Track previous scores to detect changes and fire notifications
+  const prevScoresRef = useRef<Map<string, { home: number; away: number; finished: boolean }>>(new Map());
 
   const selectionData = useMemo<SelectionData[]>(() => {
     const items: SelectionData[] = [];
@@ -333,7 +341,61 @@ export function useMatchResults(bets: Bet[]) {
         for (const [k, v] of fetched) geminiByKey.set(k, v);
       }
 
-      setResultMap(buildMapFromSources(data, oddsResults, geminiByKey));
+      const newResultMap = buildMapFromSources(data, oddsResults, geminiByKey);
+
+      // ── Score Change Detection → Fire Notifications ──
+      try {
+        for (const sel of data) {
+          const info = newResultMap.get(sel.key);
+          if (!info) continue;
+
+          // Get score from either Gemini or Odds result
+          const gemini = geminiByKey.get(sel.key);
+          const oddsResult = oddsResults.get(data.indexOf(sel));
+          const homeScore = gemini?.homeScore ?? (oddsResult?.homeScore ?? -1);
+          const awayScore = gemini?.awayScore ?? (oddsResult?.awayScore ?? -1);
+          const finished = gemini?.finished ?? (oddsResult?.status === 'completed');
+
+          if (homeScore < 0 || awayScore < 0) continue;
+
+          const prev = prevScoresRef.current.get(sel.key);
+          const teams = parseTeamsFromTitle(sel.matchTitle);
+          const matchLabel = teams ? `${teams.home} vs ${teams.away}` : sel.matchTitle;
+
+          if (prev) {
+            // Detect score change (goal!)
+            if (prev.home !== homeScore || prev.away !== awayScore) {
+              console.log(`[Notifications] Score change detected: ${matchLabel} ${prev.home}-${prev.away} → ${homeScore}-${awayScore}`);
+              notificationService.sendGoalNotification(
+                matchLabel,
+                teams?.home || 'Home',
+                teams?.away || 'Away',
+                homeScore,
+                awayScore,
+                sel.key.split('-')[0], // betId
+              );
+            }
+            // Detect match end
+            if (!prev.finished && finished) {
+              console.log(`[Notifications] Match ended: ${matchLabel} ${homeScore}-${awayScore}`);
+              notificationService.sendMatchEndNotification(
+                matchLabel,
+                homeScore,
+                awayScore,
+                info.resolvedOutcome || 'pending',
+                sel.key.split('-')[0],
+              );
+            }
+          }
+
+          // Update prev scores
+          prevScoresRef.current.set(sel.key, { home: homeScore, away: awayScore, finished });
+        }
+      } catch (notifError) {
+        console.warn('[useMatchResults] Notification error:', notifError);
+      }
+
+      setResultMap(newResultMap);
     } catch (e) {
       console.warn('[useMatchResults]', e);
     } finally {
@@ -359,7 +421,7 @@ export function useMatchResults(bets: Bet[]) {
 
   useEffect(() => {
     if (bets.length === 0) return;
-    const id = setInterval(() => fetchResults(), 180_000);
+    const id = setInterval(() => fetchResults(), 60_000);
     return () => clearInterval(id);
   }, [bets.length, fetchResults]);
 

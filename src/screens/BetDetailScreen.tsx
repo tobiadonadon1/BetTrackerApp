@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Alert, Platform, Modal } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
@@ -7,7 +7,7 @@ import { BetStatus } from '../types';
 import { useBets, useNotifications, useLiveScores, useMatchResults } from '../hooks';
 import { navigationRef } from '../services/notificationService';
 import { formatOddsWithAt } from '../utils/odds';
-import { formatBetDate, getSourceLabel } from '../utils/betFormatting';
+import { formatBetDate, getSourceLabel, formatSelectionName } from '../utils/betFormatting';
 import { useTranslation } from '../contexts/LanguageContext';
 import OverUnderProgressBar from '../components/OverUnderProgressBar';
 
@@ -27,6 +27,7 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
   const bet = bets.find(b => b.id === betId);
   const [initialFetchFinished, setInitialFetchFinished] = useState(false);
   const [selectedLegIndex, setSelectedLegIndex] = useState(routeSelIndex);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -136,29 +137,17 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
   };
 
   const handleDelete = () => {
-    if (Platform.OS === 'web') {
-      const confirm = window.confirm('Are you sure you want to delete this bet?');
-      if (confirm) {
-        deleteBet(bet.id).then(() => {
-          navigation.goBack();
-        }).catch((error: any) => {
-          const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
-          window.alert(isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to delete bet. Please try again.');
-        });
-      }
-    } else {
-      Alert.alert('Delete Bet', 'Are you sure you want to delete this bet?', [
-        { text: 'Cancel', style: 'cancel' },
-        { text: 'Delete', style: 'destructive', onPress: async () => {
-          try {
-            await deleteBet(bet.id);
-            navigation.goBack();
-          } catch (error: any) {
-            const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
-            Alert.alert('Error', isNetwork ? 'Network connection failed. Please check your internet.' : 'Failed to delete bet. Please try again.');
-          }
-        }}
-      ]);
+    setShowDeleteModal(true);
+  };
+
+  const confirmDelete = async () => {
+    setShowDeleteModal(false);
+    try {
+      await deleteBet(bet.id);
+      navigation.goBack();
+    } catch (error: any) {
+      const isNetwork = error.message?.toLowerCase().includes('fetch') || error.message?.toLowerCase().includes('network');
+      Alert.alert('Error', isNetwork ? 'Network connection failed.' : 'Failed to delete bet.');
     }
   };
 
@@ -247,40 +236,62 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
             <Text style={styles.statLabel}>{t('bookmaker')}</Text>
             <Text style={styles.statValue}>{bet.bookmaker}</Text>
           </View>
-          <View style={[styles.statRow, { borderBottomWidth: 0 }]}>
+          <View style={[styles.statRow, { borderBottomWidth: 0, alignItems: 'flex-start' }]}>
             <Text style={styles.statLabel}>Category</Text>
-            <Text style={styles.statValue}>{bet.category}{bet.league ? ` · ${bet.league}` : ''}</Text>
+            <View style={{ flex: 1, alignItems: 'flex-end' }}>
+              <Text style={styles.statValue}>{bet.category}</Text>
+              {bet.league ? <Text style={{ fontSize: 12, color: colors.textMuted, marginTop: 2, textAlign: 'right' }}>{bet.league}</Text> : null}
+            </View>
           </View>
         </View>
 
-        {focusedSelection && (
-          <View style={styles.focusCard}>
-            <View style={styles.focusHeader}>
-              <Text style={styles.sectionTitle}>Leg Focus</Text>
-              {focusedInfo && (
-                <Text style={[styles.focusStatus, { color: focusedInfo.textColor }]}>{focusedInfo.smartLabel}</Text>
-              )}
+        {focusedSelection && (() => {
+          // Smart market detection from selection text
+          const selText = (focusedSelection.selection || '').trim();
+          const rawMarket = (focusedSelection.market || bet.market || 'other').toLowerCase();
+          let displayMarket = rawMarket.toUpperCase();
+          let displaySelection = formatSelectionName(selText, focusedSelection.event);
+
+          // Auto-detect Over/Under from selection text
+          const overUnderMatch = selText.match(/^(over|under)\s*(\d+[\.,]?\d*)/i);
+          if (overUnderMatch) {
+            displayMarket = overUnderMatch[1].toUpperCase() + '/' + 'UNDER';
+            if (overUnderMatch[1].toLowerCase() === 'under') displayMarket = 'OVER/' + 'UNDER';
+            displaySelection = `${overUnderMatch[1].charAt(0).toUpperCase() + overUnderMatch[1].slice(1).toLowerCase()} ${overUnderMatch[2]}`;
+          } else if (rawMarket === 'other' && /^\d+[\.,]?\d*$/.test(selText)) {
+            // Pure number like "2.5" — likely an over/under line
+            displayMarket = 'TOTALS';
+          }
+
+          return (
+            <View style={styles.focusCard}>
+              <View style={styles.focusHeader}>
+                <Text style={styles.sectionTitle}>Leg Focus</Text>
+                {focusedInfo && (
+                  <Text style={[styles.focusStatus, { color: focusedInfo.textColor }]}>{focusedInfo.smartLabel}</Text>
+                )}
+              </View>
+              <Text style={styles.focusMatch} numberOfLines={2}>{focusedSelection.event}</Text>
+              <Text style={styles.focusSelection} numberOfLines={2}>{displaySelection}</Text>
+              <View style={styles.focusMetaRow}>
+                <Text style={styles.focusMeta}>{displayMarket}</Text>
+                <Text style={styles.focusMeta}>{formatOddsWithAt(focusedSelection.odds, focusedSelection.oddsFormat)}</Text>
+              </View>
+              {focusedInfo?.score ? (
+                <Text style={styles.focusScore}>Score: {focusedInfo.score}</Text>
+              ) : null}
+              {focusedInfo?.overUnderProgress ? (
+                <OverUnderProgressBar
+                  currentValue={focusedInfo.overUnderProgress.currentValue}
+                  threshold={focusedInfo.overUnderProgress.threshold}
+                  direction={focusedInfo.overUnderProgress.direction}
+                  statType={focusedInfo.overUnderProgress.statType}
+                  isLive={focusedInfo.overUnderProgress.isLive}
+                />
+              ) : null}
             </View>
-            <Text style={styles.focusMatch} numberOfLines={2}>{focusedSelection.event}</Text>
-            <Text style={styles.focusSelection} numberOfLines={2}>{focusedSelection.selection}</Text>
-            <View style={styles.focusMetaRow}>
-              <Text style={styles.focusMeta}>{(focusedSelection.market || bet.market).toUpperCase()}</Text>
-              <Text style={styles.focusMeta}>{formatOddsWithAt(focusedSelection.odds, focusedSelection.oddsFormat)}</Text>
-            </View>
-            {focusedInfo?.score ? (
-              <Text style={styles.focusScore}>Score: {focusedInfo.score}</Text>
-            ) : null}
-            {focusedInfo?.overUnderProgress ? (
-              <OverUnderProgressBar
-                currentValue={focusedInfo.overUnderProgress.currentValue}
-                threshold={focusedInfo.overUnderProgress.threshold}
-                direction={focusedInfo.overUnderProgress.direction}
-                statType={focusedInfo.overUnderProgress.statType}
-                isLive={focusedInfo.overUnderProgress.isLive}
-              />
-            ) : null}
-          </View>
-        )}
+          );
+        })()}
 
         {/* Live Score */}
         {bet.status === 'pending' && (() => {
@@ -372,7 +383,7 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
                   </View>
                   <Text style={styles.legEvent} numberOfLines={1}>{sel.event}</Text>
                   <View style={styles.legDetails}>
-                    <Text style={styles.legSelection} numberOfLines={1}>{sel.selection}</Text>
+                    <Text style={styles.legSelection} numberOfLines={1}>{formatSelectionName(sel.selection, sel.event)}</Text>
                     <Text style={styles.legOdds}>{formatOddsWithAt(sel.odds, sel.oddsFormat)}</Text>
                   </View>
                   <Text style={styles.legCategory}>
@@ -438,6 +449,42 @@ export default function BetDetailScreen({ route, navigation }: BetDetailScreenPr
           </View>
         )}
       </ScrollView>
+
+      {/* Custom Delete Confirmation Modal */}
+      <Modal
+        visible={showDeleteModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowDeleteModal(false)}
+      >
+        <View style={{ flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+          <View style={{ backgroundColor: colors.surface, borderRadius: 20, padding: 24, width: '100%', maxWidth: 340, borderWidth: 1, borderColor: colors.border }}>
+            <View style={{ alignItems: 'center', marginBottom: 16 }}>
+              <View style={{ width: 56, height: 56, borderRadius: 28, backgroundColor: 'rgba(239, 68, 68, 0.15)', justifyContent: 'center', alignItems: 'center', marginBottom: 12 }}>
+                <Ionicons name="trash" size={28} color={colors.error} />
+              </View>
+              <Text style={{ fontSize: 18, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 8 }}>Delete Bet</Text>
+              <Text style={{ fontSize: 14, color: colors.textMuted, textAlign: 'center', lineHeight: 20 }}>
+                Are you sure you want to delete this bet? This action cannot be undone.
+              </Text>
+            </View>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <TouchableOpacity
+                onPress={() => setShowDeleteModal(false)}
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: colors.background, borderWidth: 1, borderColor: colors.border, alignItems: 'center' }}
+              >
+                <Text style={{ fontSize: 15, fontWeight: '600', color: colors.textPrimary }}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                onPress={confirmDelete}
+                style={{ flex: 1, padding: 14, borderRadius: 12, backgroundColor: colors.error, alignItems: 'center' }}
+              >
+                <Text style={{ fontSize: 15, fontWeight: '600', color: '#fff' }}>Delete</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -472,7 +519,7 @@ const styles = StyleSheet.create({
   statsCard: { backgroundColor: colors.surface, borderRadius: 16, padding: 16, borderWidth: 1, borderColor: colors.border },
   statRow: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
   statLabel: { fontSize: 16, color: colors.textMuted },
-  statValue: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary },
+  statValue: { fontSize: 16, fontWeight: 'bold', color: colors.textPrimary, flexShrink: 1, textAlign: 'right' },
   actions: { flexDirection: 'row', gap: 12, marginTop: 24 },
   actionButton: { flex: 1, borderRadius: 12, padding: 16, alignItems: 'center' },
   actionText: { fontWeight: 'bold', color: colors.textPrimary, fontSize: 16 },

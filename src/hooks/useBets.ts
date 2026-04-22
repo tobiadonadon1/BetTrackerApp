@@ -4,7 +4,7 @@ import betService, { BetRealtimeChange } from '../services/betService';
 import bankrollService from '../services/bankrollService';
 import notificationService from '../services/notificationService';
 import { useAuth } from '../contexts/AuthContext';
-import { Bet, BetStatus } from '../types';
+import { Bet, BetStatus, BetType } from '../types';
 import { useMatchResults } from './useMatchResults';
 
 interface UpdateBetOptions {
@@ -25,12 +25,25 @@ interface BetsContextType {
 
 const BetsContext = createContext<BetsContextType | undefined>(undefined);
 
-function resolveOverallStatus(selections: Bet['selections']): BetStatus {
+function resolveOverallStatus(selections: Bet['selections'], betType: BetType): BetStatus {
   if (!selections.length) return 'pending';
+  
   const allResolved = selections.every(selection => selection.status !== 'pending');
-  if (!allResolved) return 'pending';
-  if (selections.some(selection => selection.status === 'lost')) return 'lost';
-  if (selections.every(selection => selection.status === 'won' || selection.status === 'void')) return 'won';
+  const hasLoss = selections.some(selection => selection.status === 'lost');
+  const hasWin = selections.some(selection => selection.status === 'won');
+  const allLost = selections.every(selection => selection.status === 'lost');
+
+  // CHANCE MIX (2+ OR): Basta una vincente per vincere tutto.
+  if (betType === 'chance-mix') {
+    if (hasWin) return 'won';
+    if (allResolved) return 'lost'; // Solo se tutte sono finite e nessuna ha vinto
+    return 'pending';
+  }
+
+  // CLASSICA / COMBO / PARLAY (AND logic): Tutte devono vincere. Una persa = tutto perso.
+  if (hasLoss) return 'lost';
+  if (allResolved && selections.every(s => s.status === 'won' || s.status === 'void')) return 'won';
+  
   return 'pending';
 }
 
@@ -213,7 +226,7 @@ export function BetsProvider({ children }: { children: React.ReactNode }) {
       const changed = updatedSelections.some((selection, index) => selection.status !== bet.selections[index].status);
       if (!changed) return;
 
-      const nextStatus = resolveOverallStatus(updatedSelections);
+      const nextStatus = resolveOverallStatus(updatedSelections, bet.betType);
       autoResolvingRef.current.add(bet.id);
 
       applyBetUpdate(

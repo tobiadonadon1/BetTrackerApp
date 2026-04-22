@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, FlatList, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, TouchableOpacity, TextInput, Alert, Modal, FlatList, ActivityIndicator, SectionList, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../constants/colors';
@@ -7,6 +7,7 @@ import { BetCategory, BetType, BetMarket, BetSelection, OddsFormat } from '../ty
 import { useBets, useSubscription } from '../hooks';
 import { parseOddsInput, oddsInputFromStored } from '../utils/odds';
 import { useTranslation } from '../contexts/LanguageContext';
+import { ITALIAN_MARKETS, MARKET_CATEGORIES, MarketDefinition, getMarketsByCategory } from '../constants/betMarkets';
 import oddsApiService, { OddsApiEvent } from '../services/oddsApiService';
 
 interface AddBetScreenProps {
@@ -44,7 +45,10 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
   const ocrAvailable = subLoading || canUseFeature('ocrEnabled');
   const editingBet = route.params?.bet;
 
-  const [betType, setBetType] = useState<BetType>(editingBet?.betType || 'single');
+  const [betType, setBetType] = useState<BetType>(editingBet?.betType || 'classica');
+  const [marketPickerVisible, setMarketPickerVisible] = useState(false);
+  const [marketPickerTarget, setMarketPickerTarget] = useState<string | 'single' | null>(null);
+  const [expandedMarket, setExpandedMarket] = useState<string | null>(null);
   const [title, setTitle] = useState(editingBet?.title || '');
   const [bookmaker, setBookmaker] = useState(editingBet?.bookmaker || '');
   const [bookmakerModalVisible, setBookmakerModalVisible] = useState(false);
@@ -66,9 +70,10 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
     oddsApiService.getActiveSports(); // Prefetch sports list
   }, []);
 
-  const BET_TYPES: { value: BetType; label: string }[] = [
-    { value: 'single', label: t('single') },
-    { value: 'parlay', label: t('parlay') },
+  const BET_TYPES: { value: BetType; label: string; desc: string }[] = [
+    { value: 'classica', label: 'Classica', desc: '1 selezione' },
+    { value: 'combo', label: 'Combo', desc: '2+ AND (tutte devono vincere)' },
+    { value: 'chance-mix', label: 'Chance Mix', desc: '2+ OR (basta una)' },
   ];
 
   // Multi-leg state
@@ -87,7 +92,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
 
   const [legs, setLegs] = useState<LegInput[]>(initLegs);
 
-  const isMultiLeg = betType !== 'single';
+  const isMultiLeg = betType === 'parlay' || betType === 'teaser' || betType === 'round-robin';
 
   const calculatedTotalOdds = useMemo(() => {
     if (!isMultiLeg) {
@@ -193,13 +198,18 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
           oddsFormat: parsed.format,
           status: 'pending' as const,
           category,
-          market: 'other',
+          market: (() => {
+            const sel = (singleSelection.trim() || '').toLowerCase();
+            if (/^(over|under)\s*\d/.test(sel)) return 'totals';
+            return 'other';
+          })(),
         }];
         betOddsFormat = parsed.format;
       }
 
+      const betTypeLabel = betType === 'chance-mix' ? 'Chance Mix' : betType.charAt(0).toUpperCase() + betType.slice(1);
       const betTitle = isMultiLeg
-        ? `${betType.charAt(0).toUpperCase() + betType.slice(1)} (${selections.length} legs)`
+        ? `${betTypeLabel} (${selections.length} legs)`
         : trimmedTitle;
 
       const totalOddsValue = Number(calculatedTotalOdds.toFixed(4));
@@ -235,6 +245,9 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
           date: new Date().toISOString(),
           source: 'manual',
         });
+        if (Platform.OS !== 'web') {
+          import('../services/notificationService').then(m => m.default.initialize(true));
+        }
         Alert.alert('Success', 'Bet saved!', [{ text: 'OK', onPress: () => navigation.goBack() }]);
       }
     } catch (error: any) {
@@ -260,7 +273,12 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         </TouchableOpacity>
       </View>
 
-      <ScrollView style={styles.scrollView} contentContainerStyle={styles.content}>
+      <ScrollView
+        style={styles.scrollView}
+        contentContainerStyle={styles.content}
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator
+      >
         {!editingBet && (
           <View style={styles.scanActionsRow}>
             <TouchableOpacity
@@ -309,20 +327,36 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
           </Text>
         )}
 
-        {/* Bet Type Selector */}
+        {/* Bet Type Selector (3 Large Cards) */}
         <Text style={styles.label}>Bet Type</Text>
-        <View style={styles.betTypeContainer}>
-          {BET_TYPES.map((bt) => (
-            <TouchableOpacity
-              key={bt.value}
-              style={[styles.betTypeButton, betType === bt.value && styles.betTypeButtonActive]}
-              onPress={() => setBetType(bt.value)}
-            >
-              <Text style={[styles.betTypeText, betType === bt.value && styles.betTypeTextActive]}>
-                {bt.label}
-              </Text>
-            </TouchableOpacity>
-          ))}
+        <View style={styles.betTypeCardRow}>
+          {BET_TYPES.map((bt) => {
+            const isActive = betType === bt.value;
+            // Map colors based on the bet type like in SportsbookExplorer
+            let color = colors.accent; // Default
+            if (bt.value === 'classica') color = '#4ADE80';
+            else if (bt.value === 'combo') color = '#60A5FA';
+            else if (bt.value === 'chance-mix') color = '#F59E0B';
+
+            return (
+              <TouchableOpacity
+                key={bt.value}
+                style={[
+                  styles.betTypeCard,
+                  isActive && { borderColor: color, backgroundColor: color + '1A' },
+                ]}
+                onPress={() => setBetType(bt.value)}
+                activeOpacity={0.75}
+              >
+                {/* Top colored indicator bar */}
+                <View style={[styles.betTypeCardBar, { backgroundColor: isActive ? color : 'transparent' }]} />
+                <Text style={[styles.betTypeCardLabel, isActive && { color }]}>
+                  {bt.label}
+                </Text>
+                <Text style={styles.betTypeCardDesc}>{bt.desc}</Text>
+              </TouchableOpacity>
+            );
+          })}
         </View>
 
         {/* Bookmaker Modal Picker */}
@@ -344,7 +378,7 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
               <View style={{ flex: 1 }}>
                 <Text style={styles.label}>{t('event')} *</Text>
                 <TextInput
-                  style={styles.input}
+                  style={[styles.input, { marginBottom: 0 }]}
                   placeholder={t('searchEvent')}
                   placeholderTextColor={colors.textMuted}
                   value={title}
@@ -362,13 +396,21 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
             <View style={styles.row}>
               <View style={styles.flex1}>
                 <Text style={styles.label}>{t('selection') || 'Selection'} *</Text>
-                <TextInput
-                  style={styles.input}
-                  placeholder={t('egSelection') || 'e.g. Manchester United to Win'}
-                  placeholderTextColor={colors.textMuted}
-                  value={singleSelection}
-                  onChangeText={setSingleSelection}
-                />
+                <View style={styles.eventRowWrapper}>
+                  <TextInput
+                    style={[styles.input, { flex: 1, marginBottom: 0 }]}
+                    placeholder={t('egSelection') || 'e.g. Manchester United to Win'}
+                    placeholderTextColor={colors.textMuted}
+                    value={singleSelection}
+                    onChangeText={setSingleSelection}
+                  />
+                  <TouchableOpacity
+                    style={styles.browseSportsbookBtnSmall}
+                    onPress={() => { setMarketPickerTarget('single'); setMarketPickerVisible(true); }}
+                  >
+                    <Ionicons name="list" size={20} color={colors.accent} />
+                  </TouchableOpacity>
+                </View>
               </View>
             </View>
 
@@ -521,26 +563,26 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
         )}
       </ScrollView>
 
-      {/* Bookmaker Modal */}
-      <Modal visible={bookmakerModalVisible} animationType="fade" transparent>
-        <TouchableOpacity style={styles.modalBackdrop} activeOpacity={1} onPress={() => setBookmakerModalVisible(false)}>
-          <View style={styles.modalContent}>
+      {/* Bookmaker Bottom Sheet */}
+      <Modal visible={bookmakerModalVisible} animationType="slide" transparent onRequestClose={() => setBookmakerModalVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <TouchableOpacity style={styles.modalBackdropTap} onPress={() => setBookmakerModalVisible(false)} />
+          <View style={styles.modalSheet}>
+            <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>{t('selectBookmaker')}</Text>
             <FlatList
               data={BOOKMAKERS}
               keyExtractor={item => item}
               renderItem={({ item }) => (
                 <TouchableOpacity 
-                  style={[styles.modalOption, bookmaker === item && styles.modalOptionActive]}
+                  style={styles.modalOption}
                   onPress={() => {
                     setBookmaker(item);
                     setBookmakerModalVisible(false);
                   }}
                 >
-                  <Text style={[styles.modalOptionText, bookmaker === item && styles.modalOptionTextActive]}>
-                    {item}
-                  </Text>
-                  {bookmaker === item && <Ionicons name="checkmark-circle" size={20} color={colors.primary} />}
+                  <Text style={styles.modalOptionText}>{item}</Text>
+                  {bookmaker === item && <Ionicons name="checkmark-circle" size={22} color={colors.accent} />}
                 </TouchableOpacity>
               )}
             />
@@ -548,38 +590,141 @@ export default function AddBetScreen({ navigation, route }: AddBetScreenProps) {
               <Text style={styles.modalCancelText}>{t('cancel')}</Text>
             </TouchableOpacity>
           </View>
-        </TouchableOpacity>
+        </View>
       </Modal>
 
       <SportsbookExplorer 
         visible={explorerVisible}
+        betType={betType}
+        onBetTypeChange={(bt) => setBetType(bt)}
         onClose={() => { setExplorerVisible(false); setActiveLegTarget(null); }}
-        onSelectSelection={(eventName, selectionName, selectedOdds) => {
-          if (activeLegTarget === 'single') {
+        onSelectSelection={(eventName, selectionName, selectedOdds, leagueName) => {
+          if (isMultiLeg) {
+            if (activeLegTarget && activeLegTarget !== 'single') {
+              updateLeg(activeLegTarget, 'event', eventName);
+              updateLeg(activeLegTarget, 'selection', selectionName);
+              updateLeg(activeLegTarget, 'odds', String(selectedOdds));
+            } else {
+              // Started as 'single', but changed to 'parlay' in the modal
+              if (legs.length === 0) {
+                setLegs([{ id: Date.now().toString(), event: eventName, selection: selectionName, odds: String(selectedOdds), category: category || 'Soccer' }]);
+              } else {
+                updateLeg(legs[0].id, 'event', eventName);
+                updateLeg(legs[0].id, 'selection', selectionName);
+                updateLeg(legs[0].id, 'odds', String(selectedOdds));
+              }
+            }
+          } else {
+            // Still single/classica/combo/chance-mix
             setTitle(eventName);
             setSingleSelection(selectionName);
             setOdds(String(selectedOdds));
-          } else if (activeLegTarget) {
-            updateLeg(activeLegTarget, 'event', eventName);
-            updateLeg(activeLegTarget, 'selection', selectionName);
-            updateLeg(activeLegTarget, 'odds', String(selectedOdds));
+            if (legs.length > 0) {
+              updateLeg(legs[0].id, 'event', eventName);
+              updateLeg(legs[0].id, 'selection', selectionName);
+              updateLeg(legs[0].id, 'odds', String(selectedOdds));
+            }
           }
+          if (leagueName && !league) setLeague(leagueName);
+        }}
+        onSelectEventOnly={(eventName, leagueName) => {
+          if (isMultiLeg) {
+            if (activeLegTarget && activeLegTarget !== 'single') {
+              updateLeg(activeLegTarget, 'event', eventName);
+            } else {
+              if (legs.length === 0) {
+                setLegs([{ id: Date.now().toString(), event: eventName, selection: '', odds: '', category: category || 'Soccer' }]);
+              } else {
+                updateLeg(legs[0].id, 'event', eventName);
+              }
+            }
+          } else {
+            setTitle(eventName);
+            if (legs.length > 0) updateLeg(legs[0].id, 'event', eventName);
+          }
+          if (leagueName && !league) setLeague(leagueName);
         }}
       />
+
+      {/* Italian Betting Markets Picker */}
+      <Modal visible={marketPickerVisible} animationType="slide" transparent onRequestClose={() => setMarketPickerVisible(false)}>
+        <View style={styles.modalBackdrop}>
+          <TouchableOpacity style={styles.modalBackdropTap} onPress={() => setMarketPickerVisible(false)} />
+          <View style={[styles.modalSheet, { maxHeight: '80%' }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Scegli Mercato</Text>
+            <ScrollView showsVerticalScrollIndicator>
+              {MARKET_CATEGORIES.map(cat => {
+                const markets = getMarketsByCategory(cat.key);
+                if (markets.length === 0) return null;
+                return (
+                  <View key={cat.key} style={{ marginBottom: 16 }}>
+                    <Text style={styles.marketCatHeader}>{cat.label}</Text>
+                    {markets.map(mkt => (
+                      <View key={mkt.id}>
+                        <TouchableOpacity
+                          style={styles.marketRow}
+                          onPress={() => setExpandedMarket(expandedMarket === mkt.id ? null : mkt.id)}
+                        >
+                          <Text style={styles.marketRowLabel}>{mkt.label}</Text>
+                          <Ionicons
+                            name={expandedMarket === mkt.id ? 'chevron-up' : 'chevron-down'}
+                            size={16}
+                            color={colors.textMuted}
+                          />
+                        </TouchableOpacity>
+                        {expandedMarket === mkt.id && (
+                          <View style={styles.marketOptions}>
+                            {mkt.options.map((opt, idx) => (
+                              <TouchableOpacity
+                                key={idx}
+                                style={styles.marketOption}
+                                onPress={() => {
+                                  const selectionText = `${mkt.label}: ${opt}`;
+                                  if (marketPickerTarget === 'single') {
+                                    setSingleSelection(selectionText);
+                                  } else if (marketPickerTarget) {
+                                    updateLeg(marketPickerTarget, 'selection', selectionText);
+                                  }
+                                  setMarketPickerVisible(false);
+                                  setExpandedMarket(null);
+                                }}
+                              >
+                                <Text style={styles.marketOptionText}>{opt}</Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+                        )}
+                      </View>
+                    ))}
+                  </View>
+                );
+              })}
+            </ScrollView>
+          </View>
+        </View>
+      </Modal>
 
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: {
+    flex: 1,
+    backgroundColor: colors.background,
+    ...(Platform.OS === 'web' ? { maxHeight: '100vh' as any } : {}),
+  },
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 16, paddingBottom: 12 },
   backButton: { padding: 8 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary },
   saveButton: { backgroundColor: colors.accent, paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8 },
   saveText: { fontWeight: 'bold', color: colors.primary },
-  scrollView: { flex: 1 },
-  content: { padding: 16, paddingBottom: 40 },
+  scrollView: {
+    flex: 1,
+    ...(Platform.OS === 'web' ? { height: '100%', flexBasis: 0 } : {}),
+  },
+  content: { padding: 16, paddingBottom: 100, flexGrow: 1 },
   input: { backgroundColor: colors.surface, borderRadius: 12, padding: 14, marginBottom: 12, color: colors.textPrimary, borderWidth: 1, borderColor: colors.border },
   row: { flexDirection: 'row', gap: 12 },
   flex1: { flex: 1 },
@@ -606,11 +751,41 @@ const styles = StyleSheet.create({
   scanTicketText: { fontWeight: 'bold', color: colors.primary, fontSize: 13 },
   uploadTicketText: { fontWeight: '700', color: colors.accent, fontSize: 13 },
   scanHint: { fontSize: 12, color: colors.textMuted, marginBottom: 18, textAlign: 'center', lineHeight: 16 },
-  betTypeContainer: { flexDirection: 'row', gap: 8, marginBottom: 16, flexWrap: 'wrap' },
-  betTypeButton: { paddingHorizontal: 14, paddingVertical: 8, borderRadius: 20, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.border },
-  betTypeButtonActive: { backgroundColor: colors.accent, borderColor: colors.accent },
-  betTypeText: { fontSize: 13, color: colors.textMuted, fontWeight: '600' },
-  betTypeTextActive: { color: colors.primary },
+  // ─── BET TYPE CARDS ───
+  betTypeCardRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 20,
+  },
+  betTypeCard: {
+    flex: 1,
+    borderRadius: 14,
+    borderWidth: 2,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    overflow: 'hidden',
+    paddingBottom: 14,
+    alignItems: 'center',
+  },
+  betTypeCardBar: {
+    width: '100%',
+    height: 4,
+    marginBottom: 10,
+  },
+  betTypeCardLabel: {
+    fontSize: 14,
+    fontWeight: '800',
+    color: colors.textPrimary,
+    textAlign: 'center',
+    marginBottom: 4,
+  },
+  betTypeCardDesc: {
+    fontSize: 10,
+    color: colors.textMuted,
+    textAlign: 'center',
+    paddingHorizontal: 4,
+    lineHeight: 13,
+  },
   legsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4 },
   legCard: { backgroundColor: colors.surface, borderRadius: 14, padding: 14, marginBottom: 12, borderWidth: 1, borderColor: colors.border },
   legCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
@@ -637,15 +812,34 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(74, 159, 212, 0.3)',
   },
   
-  // Modal styles 
-  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '85%', backgroundColor: colors.background, borderRadius: 16, padding: 20, maxHeight: '80%' },
-  modalTitle: { fontSize: 18, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 16, textAlign: 'center' },
-  modalOption: { flexDirection: 'row', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.border },
-  modalOptionActive: { backgroundColor: colors.accent },
-  modalOptionText: { fontSize: 16, color: colors.textPrimary },
-  modalOptionTextActive: { color: colors.primary, fontWeight: 'bold' },
-  modalCancel: { marginTop: 20, paddingVertical: 12, alignItems: 'center' },
+  // Modal styles (bottom sheet design)
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'flex-end' },
+  modalBackdropTap: { flex: 1 },
+  modalSheet: {
+    backgroundColor: colors.background,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    paddingHorizontal: 20,
+    paddingBottom: 40,
+    paddingTop: 12,
+    maxHeight: '70%',
+  },
+  modalHandle: {
+    width: 40, height: 4, backgroundColor: colors.border,
+    borderRadius: 2, alignSelf: 'center', marginBottom: 16,
+  },
+  modalTitle: { fontSize: 20, fontWeight: 'bold', color: colors.textPrimary, marginBottom: 16, textAlign: 'center' },
+  modalOption: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 16,
+    paddingHorizontal: 12,
+    borderRadius: 12,
+    marginBottom: 4,
+  },
+  modalOptionText: { fontSize: 16, color: colors.textPrimary, fontWeight: '500' },
+  modalCancel: { marginTop: 12, paddingVertical: 14, alignItems: 'center' },
   modalCancelText: { color: colors.textMuted, fontSize: 16, fontWeight: '600' },
   upgradeWarning: {
     fontSize: 12,
@@ -657,6 +851,54 @@ const styles = StyleSheet.create({
   },
   disabledButton: {
     opacity: 0.5,
+  },
+  // Market picker styles
+  marketCatHeader: {
+    fontSize: 12,
+    fontWeight: '800',
+    color: colors.accent,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+    marginTop: 4,
+  },
+  marketRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    marginBottom: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  marketRowLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: colors.textPrimary,
+  },
+  marketOptions: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    marginBottom: 8,
+  },
+  marketOption: {
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 20,
+    backgroundColor: 'rgba(74, 159, 212, 0.12)',
+    borderWidth: 1,
+    borderColor: 'rgba(74, 159, 212, 0.25)',
+  },
+  marketOptionText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: colors.accent,
   },
 });
 

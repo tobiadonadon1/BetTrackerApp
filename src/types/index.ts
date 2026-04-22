@@ -1,6 +1,6 @@
 export type BetStatus = 'pending' | 'won' | 'lost' | 'void';
 export type BetCategory = 'NBA' | 'NFL' | 'MLB' | 'NHL' | 'Soccer' | 'Tennis' | 'UFC' | 'Boxing' | 'Golf' | 'Other';
-export type BetType = 'single' | 'parlay' | 'teaser' | 'round-robin';
+export type BetType = 'single' | 'parlay' | 'teaser' | 'round-robin' | 'classica' | 'combo' | 'chance-mix';
 export type BetMarket = 'moneyline' | 'spread' | 'totals' | 'other';
 export type OddsFormat = 'decimal' | 'american';
 export type BetSource = 'manual' | 'scan-camera' | 'scan-gallery';

@@ -151,10 +151,13 @@ export function resolvePickFromScore(
   selectionStr: string,
   homeScore: number,
   awayScore: number,
+  homeTeam?: string,
+  awayTeam?: string,
 ): 'won' | 'lost' | null {
   const sel = selectionStr.toLowerCase().trim();
   const total = homeScore + awayScore;
 
+  // --- 1. ESITO PARTITA (1X2 & Doppia Chance) ---
   if (/1x2|esito.*finale|match\s*result/i.test(sel)) {
     if (/:\s*1\b|home\s*win/i.test(sel)) return homeScore > awayScore ? 'won' : 'lost';
     if (/:\s*2\b|away\s*win/i.test(sel)) return awayScore > homeScore ? 'won' : 'lost';
@@ -163,17 +166,78 @@ export function resolvePickFromScore(
     if (/\b2\b\s*$/i.test(sel)) return awayScore > homeScore ? 'won' : 'lost';
   }
 
-  if (/btts|goal.*no.*goal|entrambe/i.test(sel)) {
-    const bothScored = homeScore > 0 && awayScore > 0;
-    if (/:\s*(?:goal|yes|si|sì)\b/i.test(sel)) return bothScored ? 'won' : 'lost';
-    if (/:\s*(?:no\s*goal|no)\b/i.test(sel)) return !bothScored ? 'won' : 'lost';
+  // Standalone 1X2
+  if (/^1$/.test(sel)) return homeScore > awayScore ? 'won' : 'lost';
+  if (/^2$/.test(sel)) return awayScore > homeScore ? 'won' : 'lost';
+  if (/^x$/.test(sel)) return homeScore === awayScore ? 'won' : 'lost';
+  
+  // Doppia Chance (1X, X2, 12)
+  if (/^1x$|^1-x$|casa o pareggio/i.test(sel)) return homeScore >= awayScore ? 'won' : 'lost';
+  if (/^x2$|^x-2$|ospite o pareggio/i.test(sel)) return awayScore >= homeScore ? 'won' : 'lost';
+  if (/^12$|^1-2$/i.test(sel)) return homeScore !== awayScore ? 'won' : 'lost';
+
+  // --- 5. RISULTATO ESATTO ---
+  // e.g. "2-1" or "Risultato Esatto 2-1"
+  const exactScoreMatch = sel.match(/^(?:risultato\s*esatto\s*)?(\d+)\s*[-:]\s*(\d+)$/i);
+  if (exactScoreMatch) {
+    const p1 = parseInt(exactScoreMatch[1]);
+    const p2 = parseInt(exactScoreMatch[2]);
+    return (homeScore === p1 && awayScore === p2) ? 'won' : 'lost';
   }
 
-  const ouMatch = sel.match(/(?:over|under)\s*(\d+(?:[.,]\d+)?)/i);
+  // --- 3. GOL / NO GOL (BTTS) ---
+  const bothScored = homeScore > 0 && awayScore > 0;
+  if (/btts|goal.*no.*goal|entrambe/i.test(sel)) {
+    if (/:\s*(?:goal|yes|si|sì)\b/i.test(sel)) return bothScored ? 'won' : 'lost';
+    if (/:\s*(?:no\s*goal|no)\b/i.test(sel)) return !bothScored ? 'won' : 'lost';
+    if (/^btts$/i.test(sel)) return bothScored ? 'won' : 'lost';
+  }
+  // Standalone Italian
+  if (/^gol$|^gg$|^entrambe segnano( sì)?$/i.test(sel)) return bothScored ? 'won' : 'lost';
+  if (/^no gol$|^ng$|^entrambe segnano no$/i.test(sel)) return !bothScored ? 'won' : 'lost';
+
+  // --- 4. MULTI GOL ---
+  const multiGolMatch = sel.match(/multi\s*gol\s*(\d+)\s*[-_]\s*(\d+)/i);
+  if (multiGolMatch) {
+    const min = parseInt(multiGolMatch[1]);
+    const max = parseInt(multiGolMatch[2]);
+    return (total >= min && total <= max) ? 'won' : 'lost';
+  }
+  
+  // Multi Gol Exact / Altro -> we can't perfectly cover "Altro" w/o knowing the range of the specific bet, but ranges are captured above.
+
+  // --- 2. GOALS TOTALI (Over/Under) ---
+  const ouMatch = sel.match(/(?:over|under|o|u)\s*(\d+(?:[.,]\d+)?)/i);
   if (ouMatch) {
     const line = parseFloat(ouMatch[1].replace(',', '.'));
-    if (/over/i.test(sel)) return total > line ? 'won' : 'lost';
-    if (/under/i.test(sel)) return total < line ? 'won' : 'lost';
+    if (/over|^o\s*\d/i.test(sel)) return total > line ? 'won' : 'lost';
+    if (/under|^u\s*\d/i.test(sel)) return total < line ? 'won' : 'lost';
+  }
+
+  // Standalone number like "02.5", "2.5" → treat as OVER
+  const standaloneNum = sel.match(/^0?(\d+(?:[.,]\d+)?)$/);
+  if (standaloneNum) {
+    const line = parseFloat(standaloneNum[1].replace(',', '.'));
+    if (line > 0 && line < 20) {
+      return total > line ? 'won' : 'lost';
+    }
+  }
+
+  // --- 9. ALTRE (Pari/Dispari) ---
+  if (/^pari$/i.test(sel)) return (total % 2 === 0) ? 'won' : 'lost';
+  if (/^dispari$/i.test(sel)) return (total % 2 !== 0) ? 'won' : 'lost';
+
+  // --- Team name moneyline: selection is a team name ---
+  if (homeTeam && awayTeam) {
+    const selNorm = sel.replace(/[^a-z0-9\s]/g, '').trim();
+    const homeNorm = homeTeam.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    const awayNorm = awayTeam.toLowerCase().replace(/[^a-z0-9\s]/g, '').trim();
+    if (selNorm.includes(homeNorm) || homeNorm.includes(selNorm)) {
+      return homeScore > awayScore ? 'won' : homeScore < awayScore ? 'lost' : null;
+    }
+    if (selNorm.includes(awayNorm) || awayNorm.includes(selNorm)) {
+      return awayScore > homeScore ? 'won' : awayScore < homeScore ? 'lost' : null;
+    }
   }
 
   return null;
@@ -185,8 +249,30 @@ function parseSportKeyFromEvent(eventStr: string, category: string): string | nu
   for (const [key, sportKey] of Object.entries(LEAGUE_TO_SPORT_KEY)) {
     if (league.includes(key) || key.includes(league)) return sportKey;
   }
+  // Also search entire event string for league keywords (handles cases where league is in the title)
+  const fullLower = eventStr.toLowerCase();
+  for (const [key, sportKey] of Object.entries(LEAGUE_TO_SPORT_KEY)) {
+    if (fullLower.includes(key)) return sportKey;
+  }
   const prefixes = CATEGORY_TO_SPORT_PREFIX[category];
   if (prefixes?.length === 1 && !prefixes[0].endsWith('_')) return prefixes[0];
+  // Soccer fallback: try to detect from team names
+  if (category === 'Soccer' || category === 'Other') {
+    const soccerTeams = ['madrid', 'barcelona', 'juventus', 'milan', 'inter', 'napoli', 'roma', 'lazio',
+      'atletico', 'sevilla', 'bayern', 'dortmund', 'psg', 'lyon', 'marseille', 'ajax', 'porto', 'benfica',
+      'liverpool', 'chelsea', 'arsenal', 'tottenham', 'man', 'city', 'united',
+      'sporting', 'celtic', 'rangers', 'feyenoord', 'monaco', 'lille', 'galatasaray', 'fenerbahce'];
+    if (soccerTeams.some(t => fullLower.includes(t))) {
+      // Detect specific league from teams
+      if (/atletico|madrid|barcelona|sevilla|sociedad|betis|villarreal/i.test(fullLower)) return 'soccer_spain_la_liga';
+      if (/juventus|milan|inter|napoli|roma|lazio|fiorentina|atalanta/i.test(fullLower)) return 'soccer_italy_serie_a';
+      if (/bayern|dortmund|leverkusen|leipzig|gladbach|frankfurt/i.test(fullLower)) return 'soccer_germany_bundesliga';
+      if (/liverpool|chelsea|arsenal|tottenham|man.*utd|man.*city|newcastle|brighton|wolves|everton|west.*ham/i.test(fullLower)) return 'soccer_epl';
+      if (/psg|lyon|marseille|monaco|lille/i.test(fullLower)) return 'soccer_france_ligue_one';
+      // Champions League if mixed countries
+      return 'soccer_uefa_champs_league';
+    }
+  }
   if (category === 'Soccer') return 'soccer_italy_serie_a';
   return null;
 }
@@ -240,7 +326,7 @@ class MatchResultsService {
 
         let betOutcome: 'won' | 'lost' | null = null;
         if (status === 'completed' && scoreVals) {
-          betOutcome = resolvePickFromScore(req.selectionStr, scoreVals.home, scoreVals.away);
+          betOutcome = resolvePickFromScore(req.selectionStr, scoreVals.home, scoreVals.away, match.home_team, match.away_team);
         }
 
         results.set(idx, {

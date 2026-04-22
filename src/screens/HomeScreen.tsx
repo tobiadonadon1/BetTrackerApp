@@ -9,7 +9,7 @@ import AppBackground from '../components/AppBackground';
 import PageHeader from '../components/PageHeader';
 import { Bet, BetStatus, BetCategory } from '../types';
 import { formatOddsWithAt } from '../utils/odds';
-import { formatBetDate, getSourceLabel } from '../utils/betFormatting';
+import { formatBetDate, getSourceLabel, formatSelectionName } from '../utils/betFormatting';
 import { navigationRef } from '../services/notificationService';
 import OverUnderProgressBar from '../components/OverUnderProgressBar';
 
@@ -276,7 +276,7 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
             const titleLine = isParlay ? bet.title : (parsed?.matchTitle || bet.title);
             const pickLine = !isParlay && firstSelection
               ? [
-                  firstSelection.selection,
+                  formatSelectionName(firstSelection.selection, parsed?.matchTitle || bet.title),
                   (firstSelection.market || bet.market).toUpperCase(),
                 ].filter(Boolean).join(' · ')
               : null;
@@ -321,7 +321,9 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
                 <View style={styles.betContent}>
                   {isParlay && (
                     <View style={styles.parlayHeaderRow}>
-                      <Text style={styles.parlayHeaderLabel}>{bet.selections.length} {t('legs') || 'legs'}</Text>
+                      <Text style={styles.parlayHeaderLabel}>
+                        {bet.betType === 'chance-mix' ? 'CHANCE MIX' : bet.betType === 'combo' ? 'COMBO' : bet.betType?.toUpperCase() || 'PARLAY'} ({bet.selections.length} {t('legs') || 'legs'})
+                      </Text>
                     </View>
                   )}
                   {leagueLine ? (
@@ -368,7 +370,9 @@ export default function HomeScreen({ navigation }: HomeScreenProps) {
                                 <Text style={styles.parlayLegTitle} numberOfLines={1}>
                                   {parsedSelection.matchTitle || sel.event}
                                 </Text>
-                                <Text style={styles.parlayLegSelection} numberOfLines={1}>{sel.selection}</Text>
+                                <Text style={styles.parlayLegSelection} numberOfLines={1}>
+                                  {formatSelectionName(sel.selection, parsedSelection.matchTitle || sel.event)}
+                                </Text>
                                 <Text style={styles.parlayLegMeta} numberOfLines={1}>
                                   {[(sel.market || bet.market).toUpperCase(), formatOddsWithAt(sel.odds, sel.oddsFormat)].join(' · ')}
                                 </Text>
@@ -534,7 +538,7 @@ const styles = StyleSheet.create({
     paddingRight: 14,
     paddingBottom: 12,
     alignItems: 'center',
-    justifyContent: 'flex-start',
+    justifyContent: 'center',
     gap: 8,
   },
   parlayToggle: {

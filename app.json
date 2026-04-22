@@ -15,7 +15,7 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "com.tobiadonadon.betra",
-      "buildNumber": "18",
+      "buildNumber": "19",
       "infoPlist": {
         "NSCameraUsageDescription": "BETRA needs camera access to scan your bet tickets for automatic data extraction.",
         "NSPhotoLibraryUsageDescription": "BETRA needs photo library access to scan bet tickets from your saved photos.",

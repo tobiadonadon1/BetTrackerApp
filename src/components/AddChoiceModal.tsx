@@ -11,6 +11,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { colors } from '../constants/colors';
 import { useSubscription } from '../hooks';
+import { useTranslation } from '../contexts/LanguageContext';
 
 const USE_NATIVE = Platform.OS !== 'web';
 
@@ -25,6 +26,7 @@ interface AddChoiceModalProps {
 export default function AddChoiceModal({ visible, onClose, onScan, onManual, onGallery }: AddChoiceModalProps) {
   const slideAnim = useRef(new Animated.Value(300)).current;
   const { canUseFeature, openPaywall, loading: subLoading } = useSubscription();
+  const { t } = useTranslation();
 
   // While subscription is loading, assume OCR is available to avoid
   // blocking VIP/pro users whose tier hasn't resolved yet.
@@ -56,8 +58,8 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
         <TouchableOpacity style={styles.backdrop} onPress={onClose} />
         <Animated.View style={[styles.modal, { transform: [{ translateY: slideAnim }] }]}>
           <View style={styles.handle} />
-          <Text style={styles.title}>Add New Bet</Text>
-          <Text style={styles.subtitle}>Choose how you want to add your bet</Text>
+          <Text style={styles.title}>{t('addNewBet')}</Text>
+          <Text style={styles.subtitle}>{t('chooseHow')}</Text>
 
           <TouchableOpacity style={[styles.option, styles.scanOption, !ocrAvailable && styles.optionDisabled]} onPress={() => {
             if (!ocrAvailable) {
@@ -71,8 +73,8 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
               <Ionicons name="camera" size={28} color={ocrAvailable ? colors.primary : colors.textMuted} />
             </View>
             <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Scan Ticket</Text>
-              <Text style={styles.optionDesc}>{ocrAvailable ? 'Take a photo of your bet ticket' : 'Pro feature — Tap to upgrade'}</Text>
+              <Text style={styles.optionTitle}>{t('scanTicket')}</Text>
+              <Text style={styles.optionDesc}>{ocrAvailable ? t('alignTicket') : 'Pro feature — Tap to upgrade'}</Text>
             </View>
             {!ocrAvailable ? (
               <Ionicons name="lock-closed" size={18} color="#FBBF24" />
@@ -93,8 +95,8 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
               <Ionicons name="images" size={28} color={ocrAvailable ? colors.accent : colors.textMuted} />
             </View>
             <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Upload from Gallery</Text>
-              <Text style={styles.optionDesc}>{ocrAvailable ? 'Select existing photo' : 'Pro feature — Tap to upgrade'}</Text>
+              <Text style={styles.optionTitle}>{t('uploadGallery')}</Text>
+              <Text style={styles.optionDesc}>{ocrAvailable ? t('worksAnyLanguage') : 'Pro feature — Tap to upgrade'}</Text>
             </View>
             {!ocrAvailable ? (
               <Ionicons name="lock-closed" size={18} color="#FBBF24" />
@@ -108,14 +110,14 @@ export default function AddChoiceModal({ visible, onClose, onScan, onManual, onG
               <Ionicons name="create-outline" size={28} color={colors.textMuted} />
             </View>
             <View style={styles.optionText}>
-              <Text style={styles.optionTitle}>Manual Entry</Text>
-              <Text style={styles.optionDesc}>Enter bet details yourself</Text>
+              <Text style={styles.optionTitle}>{t('manualEntry')}</Text>
+              <Text style={styles.optionDesc}>{t('addFirstBet')}</Text>
             </View>
             <Ionicons name="chevron-forward" size={20} color={colors.textMuted} />
           </TouchableOpacity>
 
           <TouchableOpacity style={styles.cancelButton} onPress={onClose}>
-            <Text style={styles.cancelText}>Cancel</Text>
+            <Text style={styles.cancelText}>{t('cancel')}</Text>
           </TouchableOpacity>
         </Animated.View>
       </View>

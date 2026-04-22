@@ -15,3 +15,8 @@ export function formatBetDate(dateStr: string): string {
   if (Number.isNaN(date.getTime())) return dateStr;
   return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
+
+export function formatSelectionName(selection: string, eventTitle: string): string {
+  // The user explicitly requested to keep the literal selection numbers (1, X, 2, 1X, etc.)
+  return selection || '';
+}

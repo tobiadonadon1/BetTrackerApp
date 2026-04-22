@@ -9,6 +9,16 @@
       "environment": "development",
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://encdegylezyqbitongjk.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuY2RlZ3lsZXp5cWJpdG9uZ2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1MTM1MzksImV4cCI6MjA4NzA4OTUzOX0.Nwom46XItdfSkAKsyLri3Mx31F9umf8xZHyGPZHbe-w",
+        "EXPO_PUBLIC_GOOGLE_VISION_API_KEY": "AIzaSyACxWlHy4iol7tX84j7ZnnE3L4ocdSiNUU",
+        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyAicZ0ePtZIiQ8xfqRGR0wVPsAJkqSAVbQ",
+        "EXPO_PUBLIC_ODDS_API_KEY": "544ad1e4ee809b0f9101b097cdd23d55",
+        "EXPO_PUBLIC_API_FOOTBALL_KEY": "ec2c3bd7c9e43099790986337b5dac11",
+        "EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY": "appl_yhazlOMLSbDXNlmWlLpoRcoEzNj",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_live_51TIB15CL6Te0XJFm3hiTrS6ghl4386XILB3ZoC6EXtMMxWxMF7zsAOmHooLQQHJbCyFlonUK2FN7jgIMGztdjmHJ00ruCmtQxO"
       }
     },
     "preview": {
@@ -16,11 +26,31 @@
       "environment": "preview",
       "ios": {
         "simulator": false
+      },
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://encdegylezyqbitongjk.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuY2RlZ3lsZXp5cWJpdG9uZ2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1MTM1MzksImV4cCI6MjA4NzA4OTUzOX0.Nwom46XItdfSkAKsyLri3Mx31F9umf8xZHyGPZHbe-w",
+        "EXPO_PUBLIC_GOOGLE_VISION_API_KEY": "AIzaSyACxWlHy4iol7tX84j7ZnnE3L4ocdSiNUU",
+        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyAicZ0ePtZIiQ8xfqRGR0wVPsAJkqSAVbQ",
+        "EXPO_PUBLIC_ODDS_API_KEY": "544ad1e4ee809b0f9101b097cdd23d55",
+        "EXPO_PUBLIC_API_FOOTBALL_KEY": "ec2c3bd7c9e43099790986337b5dac11",
+        "EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY": "appl_yhazlOMLSbDXNlmWlLpoRcoEzNj",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_live_51TIB15CL6Te0XJFm3hiTrS6ghl4386XILB3ZoC6EXtMMxWxMF7zsAOmHooLQQHJbCyFlonUK2FN7jgIMGztdjmHJ00ruCmtQxO"
       }
     },
     "production": {
       "distribution": "store",
-      "environment": "production"
+      "environment": "production",
+      "env": {
+        "EXPO_PUBLIC_SUPABASE_URL": "https://encdegylezyqbitongjk.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImVuY2RlZ3lsZXp5cWJpdG9uZ2prIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzE1MTM1MzksImV4cCI6MjA4NzA4OTUzOX0.Nwom46XItdfSkAKsyLri3Mx31F9umf8xZHyGPZHbe-w",
+        "EXPO_PUBLIC_GOOGLE_VISION_API_KEY": "AIzaSyACxWlHy4iol7tX84j7ZnnE3L4ocdSiNUU",
+        "EXPO_PUBLIC_GEMINI_API_KEY": "AIzaSyAicZ0ePtZIiQ8xfqRGR0wVPsAJkqSAVbQ",
+        "EXPO_PUBLIC_ODDS_API_KEY": "544ad1e4ee809b0f9101b097cdd23d55",
+        "EXPO_PUBLIC_API_FOOTBALL_KEY": "ec2c3bd7c9e43099790986337b5dac11",
+        "EXPO_PUBLIC_REVENUECAT_APPLE_API_KEY": "appl_yhazlOMLSbDXNlmWlLpoRcoEzNj",
+        "EXPO_PUBLIC_STRIPE_PUBLISHABLE_KEY": "pk_live_51TIB15CL6Te0XJFm3hiTrS6ghl4386XILB3ZoC6EXtMMxWxMF7zsAOmHooLQQHJbCyFlonUK2FN7jgIMGztdjmHJ00ruCmtQxO"
+      }
     }
   },
   "submit": {

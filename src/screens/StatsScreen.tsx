@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, Animated, Dimensions, TouchableOpacity, Linking, Platform } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { LineChart, BarChart, PieChart } from 'react-native-gifted-charts';
+import { LineChart } from 'react-native-gifted-charts';
 import { colors } from '../constants/colors';
 import { useBets, useBankroll, useLiveScores, useSubscription } from '../hooks';
 import { Bet } from '../types';
@@ -9,8 +9,115 @@ import AppBackground from '../components/AppBackground';
 import PageHeader from '../components/PageHeader';
 import { useTranslation } from '../contexts/LanguageContext';
 
-const CHART_WIDTH = Dimensions.get('window').width - 48;
+const SCREEN_W = Dimensions.get('window').width;
+const CHART_WIDTH = Math.min(SCREEN_W - 72, 380);
 const CHART_COLORS = [colors.success, colors.accent, colors.pending, '#A78BFA', '#F472B6', '#34D399', '#FB923C', '#38BDF8'];
+const AXIS_COLOR = 'rgba(148,163,184,0.25)';
+const LABEL_COLOR = '#94A3B8';
+
+/* ─── Custom Chart Components ─── */
+
+function CustomVerticalBars({ data, height = 140 }: { data: { label: string; value: number; color: string }[]; height?: number }) {
+  if (data.length === 0) return null;
+  const maxVal = Math.max(...data.map(d => d.value), 1);
+  return (
+    <View>
+      <View style={{ flexDirection: 'row', alignItems: 'flex-end', height, paddingHorizontal: 8, gap: 2 }}>
+        {data.map((d, i) => (
+          <View key={i} style={{ flex: 1, alignItems: 'center', height: '100%', justifyContent: 'flex-end' }}>
+            <Text style={{ fontSize: 10, color: LABEL_COLOR, marginBottom: 4, fontWeight: '600' }}>
+              {d.value > 0 ? Math.abs(d.value).toFixed(0) + '%' : '0%'}
+            </Text>
+            <View style={{
+              width: '65%',
+              maxWidth: 42,
+              height: Math.max((d.value / maxVal) * (height - 30), 4),
+              backgroundColor: d.color,
+              borderRadius: 6,
+              minHeight: 4,
+            }} />
+          </View>
+        ))}
+      </View>
+      <View style={{ flexDirection: 'row', paddingHorizontal: 8, marginTop: 10, gap: 2 }}>
+        {data.map((d, i) => (
+          <View key={i} style={{ flex: 1, alignItems: 'center' }}>
+            <Text style={{ fontSize: 10, color: LABEL_COLOR, textAlign: 'center' }} numberOfLines={2}>{d.label}</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function CustomHorizontalBars({ data }: { data: { label: string; value: number; color: string }[] }) {
+  if (data.length === 0) return null;
+  const maxVal = Math.max(...data.map(d => d.value), 1);
+  return (
+    <View style={{ gap: 12, paddingVertical: 4 }}>
+      {data.map((d, i) => (
+        <View key={i} style={{ gap: 6 }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
+            <Text style={{ fontSize: 13, fontWeight: '600', color: colors.textPrimary }}>{d.label}</Text>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: d.color }}>{d.value}</Text>
+          </View>
+          <View style={{ height: 8, backgroundColor: 'rgba(148,163,184,0.1)', borderRadius: 4, overflow: 'hidden' }}>
+            <View style={{
+              height: '100%',
+              width: `${Math.max((d.value / maxVal) * 100, 2)}%`,
+              backgroundColor: d.color,
+              borderRadius: 4,
+            }} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function CustomDonut({ data, total }: { data: { value: number; color: string; text: string }[]; total: number }) {
+  // Simple ring segments using percentage-based widths
+  const segments = data.map(d => ({ ...d, pct: total > 0 ? (d.value / total) * 100 : 0 }));
+  return (
+    <View style={{ alignItems: 'center', paddingVertical: 12 }}>
+      {/* Ring visualization */}
+      <View style={{ width: 160, height: 160, borderRadius: 80, borderWidth: 18, borderColor: 'rgba(148,163,184,0.08)', alignItems: 'center', justifyContent: 'center', position: 'relative' }}>
+        {/* Colored arc overlay using border trick */}
+        <View style={{ position: 'absolute', top: -18, left: -18, width: 160, height: 160, borderRadius: 80, overflow: 'hidden' }}>
+          {segments.map((seg, i) => {
+            const startAngle = segments.slice(0, i).reduce((a, s) => a + (s.pct / 100) * 360, 0);
+            return (
+              <View key={i} style={{
+                position: 'absolute',
+                width: 160,
+                height: 160,
+                borderRadius: 80,
+                borderWidth: 18,
+                borderColor: 'transparent',
+                borderTopColor: seg.color,
+                borderRightColor: seg.pct > 25 ? seg.color : 'transparent',
+                borderBottomColor: seg.pct > 50 ? seg.color : 'transparent',
+                borderLeftColor: seg.pct > 75 ? seg.color : 'transparent',
+                transform: [{ rotate: `${startAngle}deg` }],
+              }} />
+            );
+          })}
+        </View>
+        <Text style={{ fontSize: 28, fontWeight: '800', color: colors.textPrimary }}>{total}</Text>
+        <Text style={{ fontSize: 11, color: LABEL_COLOR, marginTop: 2 }}>bets</Text>
+      </View>
+      {/* Legend */}
+      <View style={{ flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', marginTop: 20, gap: 4 }}>
+        {data.map((d, i) => (
+          <View key={i} style={{ flexDirection: 'row', alignItems: 'center', marginHorizontal: 10, marginVertical: 4 }}>
+            <View style={{ width: 10, height: 10, borderRadius: 5, backgroundColor: d.color, marginRight: 6 }} />
+            <Text style={{ fontSize: 13, color: 'rgba(176,198,228,0.9)', fontWeight: '500' }}>{d.text} ({d.value})</Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
 
 function AnimatedValue({ value, prefix = '', suffix = '', color = colors.textPrimary, duration = 600, decimals = 2 }: {
   value: number;
@@ -125,16 +232,36 @@ export default function StatsScreen() {
 
   const profitData = getProfitOverTime(bets);
   const perfData = [
-    { value: wonBets.length, label: 'W', frontColor: colors.success },
-    { value: lostBets.length, label: 'L', frontColor: colors.error },
-    { value: pendingBets.length, label: 'P', frontColor: colors.pending },
+    { value: wonBets.length, label: 'Win', frontColor: colors.success },
+    { value: lostBets.length, label: 'Loss', frontColor: colors.error },
+    { value: pendingBets.length, label: 'Pending', frontColor: colors.pending },
   ].filter(d => d.value > 0);
+
+  // Auto-reclassify "Other" bets based on event/selection text (team name heuristics)
+  const inferCategory = (b: Bet): string => {
+    if (b.category !== 'Other') return b.category;
+    const texts = [b.title, b.league || ''];
+    if (b.selections) b.selections.forEach(s => { texts.push(s.event || ''); texts.push(s.selection || ''); });
+    const hay = texts.join(' ').toLowerCase();
+    const soccerTeams = ['madrid', 'barcelona', 'juventus', 'milan', 'inter', 'napoli', 'roma', 'lazio',
+      'atletico', 'sevilla', 'bayern', 'dortmund', 'psg', 'lyon', 'marseille', 'ajax', 'porto', 'benfica',
+      'liverpool', 'chelsea', 'arsenal', 'tottenham', 'manchester', 'sporting', 'celtic', 'rangers',
+      'galatasaray', 'fenerbahce', 'fiorentina', 'atalanta', 'serie a', 'la liga', 'premier league',
+      'champions league', 'bundesliga', 'ligue 1', 'europa league', 'calcio', 'football', 'soccer'];
+    if (soccerTeams.some(t => hay.includes(t))) return 'Soccer';
+    if (/\b(lakers|celtics|warriors|bulls|nets|knicks|heat|bucks|nuggets|nba)\b/.test(hay)) return 'NBA';
+    if (/\b(patriots|cowboys|eagles|chiefs|packers|nfl|49ers|ravens)\b/.test(hay)) return 'NFL';
+    if (/\b(djokovic|nadal|federer|sinner|alcaraz|tennis|atp|wta)\b/.test(hay)) return 'Tennis';
+    if (/\b(ufc|mma)\b/.test(hay)) return 'UFC';
+    return 'Other';
+  };
 
   const categoryStats: Record<string, { count: number; wins: number }> = {};
   bets.forEach(bet => {
-    if (!categoryStats[bet.category]) categoryStats[bet.category] = { count: 0, wins: 0 };
-    categoryStats[bet.category].count++;
-    if (bet.status === 'won') categoryStats[bet.category].wins++;
+    const cat = inferCategory(bet);
+    if (!categoryStats[cat]) categoryStats[cat] = { count: 0, wins: 0 };
+    categoryStats[cat].count++;
+    if (bet.status === 'won') categoryStats[cat].wins++;
   });
 
   const pieData = Object.entries(categoryStats)
@@ -165,10 +292,10 @@ export default function StatsScreen() {
     : [];
 
   // --- ROI per Sport (category) ---
-  const sportStats = computeGroupedStats(bets, b => b.category);
+  const sportStats = computeGroupedStats(bets, b => inferCategory(b));
   const sportBarData = sportStats.slice(0, 6).map((s, i) => ({
     value: Math.abs(s.roi),
-    label: s.key.slice(0, 4),
+    label: s.key,
     frontColor: s.roi >= 0 ? colors.success : colors.error,
   }));
 
@@ -176,7 +303,7 @@ export default function StatsScreen() {
   const betTypeStats = computeGroupedStats(bets, b => b.betType || 'single');
   const betTypeBarData = betTypeStats.map((s, i) => ({
     value: Math.abs(s.roi),
-    label: s.key.slice(0, 5),
+    label: s.key === 'single' ? t('single') : s.key === 'parlay' ? t('parlay') : s.key,
     frontColor: s.roi >= 0 ? colors.success : colors.error,
   }));
 
@@ -189,7 +316,7 @@ export default function StatsScreen() {
   const leagueBarData = hasRealLeagues
     ? leagueStats.filter(s => s.key !== 'Unspecified').slice(0, 6).map(s => ({
         value: Math.abs(s.roi),
-        label: s.key.slice(0, 5),
+        label: s.key,
         frontColor: s.roi >= 0 ? colors.success : colors.error,
       }))
     : [];
@@ -331,24 +458,30 @@ export default function StatsScreen() {
                   <>
                     <LineChart
                       data={bankrollCurveData}
-                      width={CHART_WIDTH}
-                      height={140}
+                      width={CHART_WIDTH - 50}
+                      height={150}
                       spacing={bankrollCurveData.length > 5 ? 40 : 60}
-                      initialSpacing={16}
-                      endSpacing={16}
+                      initialSpacing={10}
+                      endSpacing={10}
                       color={changePercent >= 0 ? colors.success : colors.error}
-                      thickness={2}
+                      thickness={2.5}
                       hideDataPoints={bankrollCurveData.length > 10}
                       dataPointsColor={colors.accent}
-                      startFillColor={changePercent >= 0 ? colors.success + '40' : colors.error + '40'}
-                      endFillColor={changePercent >= 0 ? colors.success + '08' : colors.error + '08'}
+                      dataPointsRadius={4}
+                      startFillColor={changePercent >= 0 ? colors.success + '30' : colors.error + '30'}
+                      endFillColor={changePercent >= 0 ? colors.success + '05' : colors.error + '05'}
                       areaChart
                       isAnimated
                       animationDuration={800}
-                      yAxisColor="transparent"
-                      xAxisColor="rgba(255,255,255,0.12)"
-                      hideRules
-                      hideYAxisText
+                      yAxisColor={AXIS_COLOR}
+                      xAxisColor={AXIS_COLOR}
+                      yAxisThickness={1}
+                      xAxisThickness={1}
+                      yAxisTextStyle={{ color: LABEL_COLOR, fontSize: 10 }}
+                      xAxisLabelTextStyle={{ color: LABEL_COLOR, fontSize: 10 }}
+                      noOfSections={4}
+                      rulesType="dashed"
+                      rulesColor="rgba(148,163,184,0.15)"
                     />
                     <View style={styles.bankrollStats}>
                       <View style={styles.bankrollStatItem}>
@@ -390,31 +523,37 @@ export default function StatsScreen() {
             </View>
           )}
 
-          {/* Profit over time */}
+          {/* Profit over time — keep LineChart, it renders OK for line graphs */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>{t('profit') || 'Profit over time'}</Text>
             <View style={styles.chartCard}>
               {profitData.length > 1 ? (
                 <LineChart
                   data={profitData}
-                  width={CHART_WIDTH}
+                  width={CHART_WIDTH - 50}
                   height={140}
                   spacing={profitData.length > 5 ? 40 : 60}
-                  initialSpacing={16}
-                  endSpacing={16}
+                  initialSpacing={10}
+                  endSpacing={10}
                   color={netProfit >= 0 ? colors.success : colors.error}
-                  thickness={2}
+                  thickness={2.5}
                   hideDataPoints={profitData.length > 10}
                   dataPointsColor={colors.accent}
-                  startFillColor={netProfit >= 0 ? colors.success + '40' : colors.error + '40'}
-                  endFillColor={netProfit >= 0 ? colors.success + '08' : colors.error + '08'}
+                  dataPointsRadius={4}
+                  startFillColor={netProfit >= 0 ? colors.success + '30' : colors.error + '30'}
+                  endFillColor={netProfit >= 0 ? colors.success + '05' : colors.error + '05'}
                   areaChart
                   isAnimated
                   animationDuration={800}
-                  yAxisColor="transparent"
-                  xAxisColor="rgba(255,255,255,0.12)"
-                  hideRules
-                  hideYAxisText
+                  yAxisColor={AXIS_COLOR}
+                  xAxisColor={AXIS_COLOR}
+                  yAxisThickness={1}
+                  xAxisThickness={1}
+                  yAxisTextStyle={{ color: LABEL_COLOR, fontSize: 10 }}
+                  xAxisLabelTextStyle={{ color: LABEL_COLOR, fontSize: 10 }}
+                  noOfSections={4}
+                  rulesType="dashed"
+                  rulesColor="rgba(148,163,184,0.12)"
                 />
               ) : (
                 <View style={styles.chartEmpty}>
@@ -425,7 +564,7 @@ export default function StatsScreen() {
             </View>
           </View>
 
-          {/* ROI per Sport */}
+          {/* ROI per Sport — Custom Bars */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>ROI per Sport</Text>
             {!canUseFeature('advancedAnalytics') ? (
@@ -441,26 +580,10 @@ export default function StatsScreen() {
             <View style={styles.chartCard}>
               {sportBarData.length > 0 ? (
                 <>
-                  <BarChart
-                    data={sportBarData}
-                    width={CHART_WIDTH}
-                    barWidth={28}
-                    spacing={20}
-                    initialSpacing={12}
-                    isAnimated
-                    animationDuration={600}
-                    hideRules
-                    xAxisThickness={1}
-                    yAxisThickness={1}
-                    xAxisColor={colors.textMuted}
-                    yAxisColor={colors.textMuted}
-                    yAxisTextStyle={{ color: colors.textPrimary }}
-                    xAxisLabelTextStyle={{ color: colors.textPrimary }}
-                    noOfSections={3}
-                    maxValue={Math.max(...sportBarData.map(d => d.value), 10) * 1.2}
-                    barBorderRadius={4}
+                  <CustomVerticalBars
+                    data={sportBarData.map(s => ({ label: s.label, value: s.value, color: s.frontColor }))}
+                    height={130}
                   />
-                  {/* Table below */}
                   <View style={styles.roiTable}>
                     {sportStats.slice(0, 6).map((s, i) => (
                       <View key={s.key} style={styles.roiTableRow}>
@@ -470,7 +593,7 @@ export default function StatsScreen() {
                           {s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%
                         </Text>
                         <Text style={[styles.roiTableProfit, { color: s.profit >= 0 ? colors.success : colors.error }]}>
-                          {s.profit >= 0 ? '+' : ''}${s.profit.toFixed(0)}
+                          {s.profit >= 0 ? '+$' : '-$'}{Math.abs(s.profit).toFixed(0)}
                         </Text>
                       </View>
                     ))}
@@ -486,30 +609,15 @@ export default function StatsScreen() {
             )}
           </View>
 
-          {/* ROI per Bet Type */}
+          {/* ROI per Bet Type — Custom Bars */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>ROI per Bet Type</Text>
             <View style={styles.chartCard}>
               {betTypeBarData.length > 0 ? (
                 <>
-                  <BarChart
-                    data={betTypeBarData}
-                    width={CHART_WIDTH}
-                    barWidth={36}
-                    spacing={28}
-                    initialSpacing={12}
-                    isAnimated
-                    animationDuration={600}
-                    hideRules
-                    xAxisThickness={1}
-                    yAxisThickness={1}
-                    xAxisColor={colors.textMuted}
-                    yAxisColor={colors.textMuted}
-                    yAxisTextStyle={{ color: colors.textPrimary }}
-                    xAxisLabelTextStyle={{ color: colors.textPrimary }}
-                    noOfSections={3}
-                    maxValue={Math.max(...betTypeBarData.map(d => d.value), 10) * 1.2}
-                    barBorderRadius={4}
+                  <CustomVerticalBars
+                    data={betTypeBarData.map(s => ({ label: s.label, value: s.value, color: s.frontColor }))}
+                    height={130}
                   />
                   <View style={styles.roiTable}>
                     {betTypeStats.map(s => (
@@ -520,7 +628,7 @@ export default function StatsScreen() {
                           {s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%
                         </Text>
                         <Text style={[styles.roiTableProfit, { color: s.profit >= 0 ? colors.success : colors.error }]}>
-                          {s.profit >= 0 ? '+' : ''}${s.profit.toFixed(0)}
+                          {s.profit >= 0 ? '+$' : '-$'}{Math.abs(s.profit).toFixed(0)}
                         </Text>
                       </View>
                     ))}
@@ -535,30 +643,15 @@ export default function StatsScreen() {
             </View>
           </View>
 
-          {/* ROI per League */}
+          {/* ROI per League — Custom Bars */}
           <View style={styles.section}>
             <Text style={styles.sectionTitle}>ROI per League</Text>
             <View style={styles.chartCard}>
               {hasRealLeagues && leagueBarData.length > 0 ? (
                 <>
-                  <BarChart
-                    data={leagueBarData}
-                    width={CHART_WIDTH}
-                    barWidth={28}
-                    spacing={20}
-                    initialSpacing={12}
-                    isAnimated
-                    animationDuration={600}
-                    hideRules
-                    xAxisThickness={1}
-                    yAxisThickness={1}
-                    xAxisColor={colors.textMuted}
-                    yAxisColor={colors.textMuted}
-                    yAxisTextStyle={{ color: colors.textPrimary }}
-                    xAxisLabelTextStyle={{ color: colors.textPrimary }}
-                    noOfSections={3}
-                    maxValue={Math.max(...leagueBarData.map(d => d.value), 10) * 1.2}
-                    barBorderRadius={4}
+                  <CustomVerticalBars
+                    data={leagueBarData.map(s => ({ label: s.label, value: s.value, color: s.frontColor }))}
+                    height={130}
                   />
                   <View style={styles.roiTable}>
                     {leagueStats.filter(s => s.key !== 'Unspecified').slice(0, 6).map(s => (
@@ -569,7 +662,7 @@ export default function StatsScreen() {
                           {s.roi >= 0 ? '+' : ''}{s.roi.toFixed(1)}%
                         </Text>
                         <Text style={[styles.roiTableProfit, { color: s.profit >= 0 ? colors.success : colors.error }]}>
-                          {s.profit >= 0 ? '+' : ''}${s.profit.toFixed(0)}
+                          {s.profit >= 0 ? '+$' : '-$'}{Math.abs(s.profit).toFixed(0)}
                         </Text>
                       </View>
                     ))}
@@ -584,25 +677,13 @@ export default function StatsScreen() {
             </View>
           </View>
 
-          {/* W / L / P */}
+          {/* Win / Loss / Pending — Custom Horizontal Bars */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>{t('statsWLP') || 'W / L / P'}</Text>
+            <Text style={styles.sectionTitle}>{t('statsWLP') || 'Win / Loss / Pending'}</Text>
             <View style={styles.chartCard}>
               {perfData.length > 0 ? (
-                <BarChart
-                  data={perfData}
-                  horizontal
-                  width={CHART_WIDTH}
-                  barWidth={22}
-                  spacing={24}
-                  initialSpacing={12}
-                  isAnimated
-                  animationDuration={600}
-                  hideRules
-                  xAxisThickness={0}
-                  yAxisThickness={0}
-                  noOfSections={2}
-                  maxValue={Math.max(...perfData.map(d => d.value), 1) * 1.2}
+                <CustomHorizontalBars
+                  data={perfData.map(d => ({ label: d.label === 'Win' ? 'Won' : d.label === 'Loss' ? 'Lost' : d.label, value: d.value, color: d.frontColor }))}
                 />
               ) : (
                 <View style={styles.chartEmpty}>
@@ -612,33 +693,12 @@ export default function StatsScreen() {
             </View>
           </View>
 
-          {/* By category — donut */}
+          {/* By category — Custom Donut */}
           <View style={styles.section}>
-            <Text style={styles.sectionTitle}>By category</Text>
+            <Text style={styles.sectionTitle}>By Category</Text>
             <View style={styles.chartCard}>
               {pieData.length > 0 ? (
-                <View style={styles.pieWrap}>
-                  <PieChart
-                    data={pieData}
-                    donut
-                    radius={70}
-                    innerRadius={44}
-                    innerCircleColor="rgba(11, 27, 61, 0.9)"
-                    isAnimated
-                    animationDuration={700}
-                    centerLabelComponent={() => (
-                      <Text style={styles.pieCenter}>{totalBets}</Text>
-                    )}
-                  />
-                  <View style={styles.pieLegend}>
-                    {pieData.slice(0, 4).map((d, i) => (
-                      <View key={i} style={styles.legendRow}>
-                        <View style={[styles.legendDot, { backgroundColor: d.color }]} />
-                        <Text style={styles.legendText}>{d.text} ({d.value})</Text>
-                      </View>
-                    ))}
-                  </View>
-                </View>
+                <CustomDonut data={pieData} total={totalBets} />
               ) : (
                 <View style={styles.chartEmpty}>
                   <Ionicons name="pie-chart-outline" size={32} color={colors.textMuted} />
@@ -671,7 +731,7 @@ export default function StatsScreen() {
                     <View style={styles.bookStatCol}>
                       <Text style={styles.bookStatLabel}>P/L</Text>
                       <Text style={[styles.bookStatVal, { color: book.profit >= 0 ? colors.success : colors.error }]}>
-                        {book.profit >= 0 ? '+' : ''}${book.profit.toFixed(0)}
+                        {book.profit >= 0 ? '+$' : '-$'}{Math.abs(book.profit).toFixed(0)}
                       </Text>
                     </View>
                     <View style={styles.bookStatCol}>
@@ -710,7 +770,7 @@ export default function StatsScreen() {
           )}
 
           {/* Live Match Monitoring (MVP) */}
-          <View style={styles.section}>
+          <View style={[styles.section, { marginTop: 24 }]}>
             <Text style={styles.sectionTitle}>Live Monitoring</Text>
             <View style={styles.liveCard}>
               {liveBets.length > 0 ? (
@@ -836,11 +896,12 @@ const styles = StyleSheet.create({
   chartCard: {
     backgroundColor: 'rgba(27, 56, 102, 0.35)',
     borderRadius: 12,
-    padding: 14,
+    padding: 16,
     borderWidth: 1,
     borderColor: 'rgba(123, 168, 228, 0.1)',
     minHeight: 130,
     justifyContent: 'center',
+    overflow: 'hidden',
   },
   chartEmpty: {
     alignItems: 'center',
@@ -854,19 +915,26 @@ const styles = StyleSheet.create({
   },
 
   pieWrap: {
-    flexDirection: 'row',
+    flexDirection: 'column',
     alignItems: 'center',
-    justifyContent: 'space-around',
+    justifyContent: 'center',
+    paddingVertical: 12,
   },
   pieCenter: {
     fontSize: 20,
     fontWeight: '700',
     color: colors.textPrimary,
   },
-  pieLegend: { marginLeft: 8 },
-  legendRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 6, gap: 8 },
-  legendDot: { width: 8, height: 8, borderRadius: 4 },
-  legendText: { fontSize: 12, color: 'rgba(176, 198, 228, 0.9)' },
+  pieLegend: {
+    marginTop: 20,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    justifyContent: 'center',
+    width: '100%',
+  },
+  legendRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 8, marginHorizontal: 8, gap: 8 },
+  legendDot: { width: 10, height: 10, borderRadius: 5 },
+  legendText: { fontSize: 13, color: 'rgba(176, 198, 228, 0.9)', fontWeight: '500' },
 
   extraRow: {
     flexDirection: 'row',
@@ -1015,6 +1083,7 @@ const styles = StyleSheet.create({
     padding: 14,
     borderWidth: 1,
     borderColor: 'rgba(123, 168, 228, 0.12)',
+    minHeight: 120,
   },
   liveBetRow: {
     flexDirection: 'row',
